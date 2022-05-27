@@ -54,97 +54,7 @@ def align_images_ecc(im1, im2):
     return im1_aligned, mask
 
 
-def align_images(im1, im2):
-    """From https://learnopencv.com/image-alignment-feature-based-using-opencv-c-python/
-    Align image 1 to image 2
-    """
-    MAX_FEATURES = 500
-    GOOD_MATCH_PERCENT = 0.2
-
-    # Convert images to grayscale
-    im1Gray = cv2.cvtColor(im1, cv2.COLOR_BGR2GRAY)
-    im2Gray = cv2.cvtColor(im2, cv2.COLOR_BGR2GRAY)
-
-    # Detect ORB features and compute descriptors.
-    orb = cv2.ORB_create(MAX_FEATURES)
-    keypoints1, descriptors1 = orb.detectAndCompute(im1Gray, None)
-    keypoints2, descriptors2 = orb.detectAndCompute(im2Gray, None)
-
-    # Match features.
-    matcher = cv2.DescriptorMatcher_create(cv2.DESCRIPTOR_MATCHER_BRUTEFORCE_HAMMING)
-    matches = matcher.match(descriptors1, descriptors2, None)
-
-    # Sort matches by score
-    matches = sorted(matches, key=lambda x: x.distance, reverse=False)
-
-    # Remove not so good matches
-    numGoodMatches = int(len(matches) * GOOD_MATCH_PERCENT)
-    matches = matches[:numGoodMatches]
-
-    # Draw top matches
-    imMatches = cv2.drawMatches(im1, keypoints1, im2, keypoints2, matches, None)
-    cv2.imwrite("matches.jpg", imMatches)
-
-    # Extract location of good matches
-    points1 = np.zeros((len(matches), 2), dtype=np.float32)
-    points2 = np.zeros((len(matches), 2), dtype=np.float32)
-
-    for i, match in enumerate(matches):
-        points1[i, :] = keypoints1[match.queryIdx].pt
-        points2[i, :] = keypoints2[match.trainIdx].pt
-
-    # Find homography
-    h, mask = cv2.findHomography(points1, points2, cv2.RANSAC)
-
-    # Use homography
-    height, width, channels = im2.shape
-    mask_ones = np.full_like(im1[..., 0], 255)
-    im1Reg = cv2.warpPerspective(im1, h, (width, height))
-    mask = cv2.warpPerspective(mask_ones, h, (width, height))
-
-    return im1Reg, mask
-
-
-def apply_lut(images: [Image], lut: np.ndarray) -> [np.ndarray]:
-    """ Apply LUT transformation
-
-    :param images:  [[width, height, channel ]]
-    :param lut: 4 dimensions: first three are raw r,g,b coordinates.
-        last has 3 entries for r,g,b target coordinates
-    :return:
-    """
-    r = np.linspace(0, 255, lut.shape[0])
-    g = np.linspace(0, 255, lut.shape[1])
-    b = np.linspace(0, 255, lut.shape[2])
-
-    print('Making interpolator')
-    interpolator = interpolate.RegularGridInterpolator(
-        (r, g, b),
-        lut
-    )
-
-    images_transformed = []
-    for image in images:
-        print('transforming image')
-        image_array = np.asarray(image)
-        # pixels = np.reshape(image_array, (image_array.shape[0] * image_array.shape[1], image_array.shape[-1]))
-        pixels_transformed = interpolator(image_array)
-
-        images_transformed.append(
-            pixels_transformed
-        )
-        print('transformed image')
-
-    return images_transformed
-
-    # raise NotImplementedError
-
-
 def get_aligned_image_pair(path_reference, path_raw):
-    # references = []
-    # raws = []
-    # masks = []
-    # for path_reference, path_raw in tqdm(filepaths_images):
     reference = Image.open(path_reference)
     raw = Image.open(path_raw)
     # reference = cv2.imread(path_reference, cv2.COLOR_BGR2RGB)
@@ -158,24 +68,13 @@ def get_aligned_image_pair(path_reference, path_raw):
     )
     print('Finished alignment')
 
-    # blur the images a bit to reduce effects of spatial processing of in camera image (sharpening etc.)
-    # size_blur = (1, 1)
-    # reference_aligned_blurred = cv2.blur(reference_aligned, size_blur)
-    # raw_blurred = cv2.blur(np.asarray(raw), size_blur)
-    # mask_blurred = cv2.blur(mask, size_blur)
-
-    # reference_result = Image.fromarray(reference_aligned, mode='RGB')
-    # raw_result = Image.fromarray(np.asarray(raw), mode='RGB')
     mask_result = mask == 255
-
-    # Image.blend(references[-1], raws[-1], 0.5).show()
 
     return reference_aligned, np.asarray(raw), mask_result
 
 
 def estimate_lut(filepaths_images: [[str, str]], size=8, n_pixels_sample=100000) -> np.ndarray:
     """
-
     :param filepaths_images: paths of image pairs: [reference, vanilla raw development]
     :return:
     """
@@ -197,55 +96,6 @@ def estimate_lut(filepaths_images: [[str, str]], size=8, n_pixels_sample=100000)
     lut_result = perform_estimation_linear_regression(pixels_references, pixels_raws, size)
 
     return lut_result
-
-
-def perform_estimation_local_mean(references: [Image], raws: [Image], masks: [np.ndarray], size):
-    coordinates = np.linspace(0, 255, size)
-    centers = np.stack(np.meshgrid(coordinates, coordinates, coordinates, indexing='ij'), axis=-1)
-
-    references_arrays = [np.asarray(img) for img in references]
-    raws_arrays = [np.asarray(img) for img in raws]
-
-    max_distance = 255. / (size - 1)
-
-    result = np.zeros(
-        (size, size, size, 3),
-        np.float
-    )
-
-    luts_unnormalized_images = [
-        np.zeros(
-            (size, size, size, 3),
-            np.float
-        ) for image in raws
-    ]
-    sums_weights = np.zeros(
-        (size, size, size),
-        np.float
-    )
-    for idx_image, (raw, reference, mask) in enumerate(zip(raws_arrays, references_arrays, masks)):
-        invalid_region = np.logical_not(mask)
-        for idx_r in tqdm(range(size)):
-            r = coordinates[idx_r]
-            diff_r_squared = (raw[..., 0] - r) ** 2
-            for idx_g in range(size):
-                g = coordinates[idx_g]
-                diff_g_squared = (raw[..., 1] - g) ** 2
-                for idx_b in range(size):
-                    b = coordinates[idx_b]
-                    diff_b_squared = (raw[..., 2] - b) ** 2
-
-                    distances = np.sqrt(diff_g_squared + diff_b_squared + diff_r_squared)
-                    weights = np.maximum(1. - (distances / max_distance), 0.)
-                    weights[invalid_region] = 0.
-
-                    luts_unnormalized_images[idx_image][idx_r, idx_g, idx_b] += np.sum(
-                        reference * weights[..., np.newaxis],
-                        axis=(0, 1)
-                    )
-                    sums_weights[idx_r, idx_g, idx_b] += np.sum(weights)
-
-    return result
 
 
 def sample_indices_pixels(pixels, n_samples=100000, uniform=False):
@@ -351,7 +201,6 @@ def perform_estimation_linear_regression(pixels_references, pixels_raws, size):
     )
 
     transformed = img_evaluation_raw.filter(lut)
-    # filtered_np = apply_lut(raws, result)[0]
 
     # img_evaluation_reference.show()
     # transformed.show()
