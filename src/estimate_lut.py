@@ -1,11 +1,19 @@
 import numpy as np
 import cv2
 from PIL import ImageFilter, Image
-from scipy import optimize, interpolate, stats
-from sklearn.linear_model import LinearRegression, Lasso
+from sklearn.linear_model import Lasso
 import logging
 from tqdm import tqdm
+import tempfile
+import os
+import subprocess
 
+
+# TODO: proper 16 bit handling with correspondin export from darktable.
+#   stop using pillow. it is buggy and has very limited support for 16 bit handling.
+#   load directly via cv2
+
+# TODO: use constrained optimization
 
 def align_images_ecc(im1, im2):
     """Align image 1 to image 2.
@@ -73,7 +81,7 @@ def get_aligned_image_pair(path_reference, path_raw):
     return reference_aligned, np.asarray(raw), mask_result
 
 
-def estimate_lut(filepaths_images: [[str, str]], size=8, n_pixels_sample=100000) -> np.ndarray:
+def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample) -> np.ndarray:
     """
     :param filepaths_images: paths of image pairs: [reference, vanilla raw development]
     :return:
@@ -98,7 +106,7 @@ def estimate_lut(filepaths_images: [[str, str]], size=8, n_pixels_sample=100000)
     return lut_result
 
 
-def sample_indices_pixels(pixels, n_samples=100000, uniform=False):
+def sample_indices_pixels(pixels, n_samples, uniform=False):
     if uniform:
         histogram, edges = np.histogramdd(pixels, density=False,
                                           bins=np.tile(np.linspace(0, 256, 10)[np.newaxis, ...], [3, 1]))
@@ -140,7 +148,7 @@ def get_pixels_sample_image_pair(path_reference, path_raw, n_samples):
         )
     )[np.reshape(mask, mask.shape[0] * mask.shape[1])]
 
-    indices_sample = sample_indices_pixels(pixels_raw)
+    indices_sample = sample_indices_pixels(pixels_raw, n_samples)
     result_raw = pixels_raw[indices_sample].astype(np.float64)
     result_reference = pixels_reference[indices_sample].astype(np.float64)
 
@@ -179,8 +187,7 @@ def perform_estimation_linear_regression(pixels_references, pixels_raws, size):
     result = make_lut_identity(size)
     differences_references_raw = pixels_references - pixels_raws
     for idx_channel in range(3):
-        # regression = LinearRegression(fit_intercept=False, positive=False)
-        regression = Lasso(alpha=1e-5, fit_intercept=False, positive=False)
+        regression = Lasso(alpha=1e-4, fit_intercept=False)
         regression.fit(design_matrix, differences_references_raw[..., idx_channel])
 
         lut_difference_channel = np.reshape(regression.coef_, [size, size, size])
@@ -239,6 +246,107 @@ def make_lut_identity(size):
     return result
 
 
+def run_process(args):
+    process = subprocess.Popen(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    while True:
+        output = process.stdout.readline()
+        if process.poll() is not None:
+            break
+        if output:
+            print(output.strip())
+
+
+def main(dir_images, file_out, level=3, n_pixels_sample=1000):
+    extensions_raw = ['raw', 'raf', 'dng', 'nef', 'cr3', 'arw', 'cr2', 'cr3', 'orf', 'rw2']
+    extensions_image = ['jpg', 'jpeg', 'tiff', 'tif', 'png']
+
+    pairs_images = []
+    for filename_raw in os.listdir(dir_images):
+        path_raw = os.path.join(dir_images, filename_raw)
+        base_raw, extension_raw = os.path.splitext(filename_raw)
+        if extension_raw[1:].lower() in extensions_raw:
+            for filename_image in os.listdir(dir_images):
+                path_image = os.path.join(dir_images, filename_image)
+                base_image, extension_image = os.path.splitext(filename_image)
+                if extension_image[1:].lower() in extensions_image and base_image == base_raw:
+                    pairs_images.append((path_image, path_raw))
+
+    # use darktable to generate images
+    with tempfile.TemporaryDirectory() as path_dir_temp:
+
+        # command_base = 'darktable-cli {path_in} {path_xmp} {path_out} --core --configdir ://temp --library :memory:'
+
+        filepaths_images_converted = []
+
+        for path_image, path_raw in pairs_images:
+            path_out_image = os.path.join(path_dir_temp, os.path.basename(path_image) + '.png')
+            path_out_raw = os.path.join(path_dir_temp, os.path.basename(path_raw) + '.png')
+            print(f'converting image {os.path.basename(path_image)}')
+            run_process(
+                [
+                    'darktable-cli',
+                    path_image,
+                    'styles/image.xmp',
+                    path_out_image,
+                    # '--core',
+                    # '--configdir \'://temp\'',
+                    # '--library \':memory:\''
+                ]
+            )
+            print(f'converting raw {os.path.basename(path_raw)}')
+
+            run_process(
+                [
+                    'darktable-cli',
+                    path_raw,
+                    'styles/raw.xmp',
+                    path_out_raw,
+                ]
+            )
+
+            filepaths_images_converted.append((path_out_image, path_out_raw))
+
+        print('Finished converting. Generating LUT.')
+        # a halc clut is a cube with level**2 entries on each dimension
+        result = estimate_lut(filepaths_images_converted, level ** 2, n_pixels_sample)
+
+        write_hald(result, file_out, bit_depth=16)
+
+        return result
+
+
+def write_hald(lut: np.ndarray, path_output, bit_depth=8):
+    if bit_depth not in ([8, 16]):
+        raise ValueError(f'Bit depth must be 8 or 16. is: {bit_depth}')
+    # size of quadratic haldclut is level**3 and cube size is level**2
+    image_size = int(np.power(lut.shape[0], 1.5))
+
+    # lut is float with 0-255. convert to uint16 for saving in 16 bit
+
+    if bit_depth == 16:
+        lut = (lut * (2 ** 16 / 2 ** 8)).astype(np.uint16)
+
+    # result = np.ndarray(
+    #     (image_size, image_size, 3),
+    #     np.uint16
+    # )
+
+    result = np.reshape(lut, (image_size, image_size, 3))
+
+    cv2.imwrite(
+        path_output,
+        # cv2.cvtColor(result, cv2.COLOR_RGB2BGR)
+        result
+    )
+
+    # result_pil = Image.fromarray(result, mode='I;16')
+    # result_pil.save(path_output)
+
+
 if __name__ == '__main__':
     paths = [
         (
@@ -247,4 +355,16 @@ if __name__ == '__main__':
         )
     ]
 
-    estimate_lut(paths, size=8, n_pixels_sample=1000000)
+    path_samples = '/home/bjoern/PycharmProjects/darktabe_hald_generator/samples'
+
+    file_out = '/home/bjoern/Pictures/hald-clut/HaldCLUT/test.png'
+
+    identity = make_lut_identity(16)
+    # write_hald(identity, file_out)
+
+    lut = main(path_samples, file_out, level=4, n_pixels_sample=100000)
+
+    # lut = estimate_lut(paths, size=9, n_pixels_sample=100000)
+
+    write_hald(lut, 'hald.png', 16)
+file_out
