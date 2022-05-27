@@ -131,18 +131,13 @@ def estimate_lut(filepaths_images: [[str, str]], size=8) -> np.ndarray:
         masks.append(mask_blurred == 255)
 
     # references[0].show()
-    # lut estimation
-    # lut_start = ImageFilter.Color3DLUT.generate(
-    #     size,
-    #     lambda r, g, b: (r, g, b)
-    # )
 
     perform_estimation_linear_regression(references, raws, masks, size)
 
     return params_lut_optimized
 
 
-def perfom_estimation_local_mean(references: [Image], raws: [Image], masks: [np.ndarray], size):
+def perform_estimation_local_mean(references: [Image], raws: [Image], masks: [np.ndarray], size):
     coordinates = np.linspace(0, 255, size)
     centers = np.stack(np.meshgrid(coordinates, coordinates, coordinates, indexing='ij'), axis=-1)
 
@@ -191,7 +186,7 @@ def perfom_estimation_local_mean(references: [Image], raws: [Image], masks: [np.
     return result
 
 
-def sample_indices_pixels(pixels, n_samples=100000, uniform=False):
+def sample_indices_pixels(pixels, n_samples=1000, uniform=False):
     if uniform:
         histogram, edges = np.histogramdd(pixels, density=False,
                                           bins=np.tile(np.linspace(0, 256, 10)[np.newaxis, ...], [3, 1]))
@@ -252,6 +247,11 @@ def perform_estimation_linear_regression(references: [Image], raws: [Image], mas
     weights_distances_channels = np.maximum(1. - np.abs(differences_channels_relative_grid_steps), 0.)
     # differences_colors_squared = differences_colors**2
 
+    identity = make_lut_identity(size)
+    lut = get_lut_pillow(identity)
+    filtered = raws[0].filter(lut)
+    filtered.show()
+
     idx_design_matrix = 0
     for idx_r in tqdm(range(size)):
         for idx_g in range(size):
@@ -276,12 +276,11 @@ def perform_estimation_linear_regression(references: [Image], raws: [Image], mas
         regression.fit(design_matrix, pixels_references[..., idx_channel])
 
         lut_channel = np.reshape(regression.coef_, [size, size, size])
-        lut_channel = np.swapaxes(lut_channel, 0, 2)
         result[..., idx_channel] = lut_channel
 
     result = np.clip(result, a_min=0., a_max=255)
 
-    lut = ImageFilter.Color3DLUT(size=size, table=result.flatten() / 255.)
+    lut = get_lut_pillow(result)
 
     filtered = raws[0].filter(lut)
     # filtered_np = apply_lut(raws, result)[0]
@@ -300,6 +299,29 @@ def perform_estimation_linear_regression(references: [Image], raws: [Image], mas
     pass
 
 
+def get_lut_pillow(
+        # [r,g,b,channel(RGB)]
+        lut_np
+):
+    lut_bgr = np.swapaxes(lut_np, 0, 2)
+    return ImageFilter.Color3DLUT(size=lut_bgr.shape[0], table=lut_bgr.flatten() / 255.)
+
+
+def make_lut_identity(size):
+    # identity with [r,g,b, channel]
+    result = np.stack(
+        np.meshgrid(
+            *([
+                  np.linspace(0, 255, size)[np.newaxis, ...],
+              ] * 3),
+            indexing='ij'
+        ),
+        axis=-1
+    )
+
+    return result
+
+
 if __name__ == '__main__':
     paths = [
         (
@@ -307,5 +329,7 @@ if __name__ == '__main__':
             '/home/bjoern/Pictures/2022_05_19_hochzeit/fuji/darktable_exported_lut/raw.png',
         )
     ]
+
+    identity = make_lut_identity(4)
 
     estimate_lut(paths, size=8)
