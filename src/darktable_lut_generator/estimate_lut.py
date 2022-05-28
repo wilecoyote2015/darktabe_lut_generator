@@ -289,23 +289,6 @@ def make_lut_identity_normed(size):
 
     return result
 
-
-def run_process(args):
-    print(f'running {" ".join(args)}')
-    process = subprocess.Popen(
-        args,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        # shell=True
-    )
-    while True:
-        output = process.stdout.readline()
-        if process.poll() is not None:
-            break
-        if output:
-            print(output.strip())
-
-
 def main(dir_images, file_out, level=3, n_pixels_sample=100000, path_dt_exec=None):
     extensions_raw = ['raw', 'raf', 'dng', 'nef', 'cr3', 'arw', 'cr2', 'cr3', 'orf', 'rw2']
     extensions_image = ['jpg', 'jpeg', 'tiff', 'tif', 'png']
@@ -329,34 +312,38 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, path_dt_exec=Non
             path_out_image = os.path.join(path_dir_temp, os.path.basename(path_image) + '.png')
             path_out_raw = os.path.join(path_dir_temp, os.path.basename(path_raw) + '.png')
             print(f'converting image {os.path.basename(path_image)}')
-            run_process(
-                [
-                    'darktable-cli' if path_dt_exec is None else path_dt_exec,
-                    path_image,
-                    os.path.join('../..', 'styles', 'image.xmp'),
-                    path_out_image,
-                    '--core',
-                    '--configdir',
-                    '\'://temp\'',
-                    '--library',
-                    '\':memory:\''
-                ]
-            )
-            print(f'converting raw {os.path.basename(path_raw)}')
+            # TODO: make temporary config and memory db work
+            with tempfile.TemporaryDirectory() as path_dir_conf_temp:
+                with path('darktable_lut_generator.styles', 'image.xmp') as path_xmp:
+                    subprocess.call(
+                        [
+                            'darktable-cli' if path_dt_exec is None else path_dt_exec,
+                            path_image,
+                            str(path_xmp.resolve()),
+                            path_out_image,
+                            '--core',
+                            '--configdir',
+                            path_dir_conf_temp,
+                            '--library',
+                            ':memory:'
+                        ]
+                    )
+                print(f'converting raw {os.path.basename(path_raw)}')
 
-            run_process(
-                [
-                    'darktable-cli' if path_dt_exec is None else path_dt_exec,
-                    path_raw,
-                    os.path.join('../..', 'styles', 'raw.xmp'),
-                    path_out_raw,
-                    '--core',
-                    '--configdir',
-                    '://temp',
-                    '--library',
-                    ':memory:'
-                ]
-            )
+                with path('darktable_lut_generator.styles', 'raw.xmp') as path_xmp:
+                    subprocess.call(
+                        [
+                            'darktable-cli' if path_dt_exec is None else path_dt_exec,
+                            path_raw,
+                            str(path_xmp.resolve()),
+                            path_out_raw,
+                            '--core',
+                            '--configdir',
+                            path_dir_conf_temp,
+                            '--library',
+                            ':memory:'
+                        ]
+                    )
 
             filepaths_images_converted.append((path_out_image, path_out_raw))
 
