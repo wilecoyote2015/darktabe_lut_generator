@@ -1,0 +1,2 @@
+include src/darktable_lut_generator/styles/image.xmp
+include src/darktable_lut_generator/styles/raw.xmp

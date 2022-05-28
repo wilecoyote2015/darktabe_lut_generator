@@ -24,6 +24,7 @@ from tqdm import tqdm
 import tempfile
 import os
 import subprocess
+from importlib.resources import path
 
 def align_images_ecc(im1, im2):
     """Align image 1 to image 2.
