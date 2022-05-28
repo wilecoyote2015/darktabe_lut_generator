@@ -90,7 +90,7 @@ def get_aligned_image_pair(path_reference, path_raw):
     mask_result = mask == get_max_value(reference)
 
     mix = 0.5 * reference_aligned + 0.5 * np.asarray(raw)
-    cv2.imwrite(os.path.join('..', 'output', os.path.basename(path_reference)), mix)
+    # cv2.imwrite(os.path.join('..', 'output', os.path.basename(path_reference)), mix)
 
     return reference_aligned, np.asarray(raw), mask_result
 
@@ -121,26 +121,64 @@ def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample) -> np.nd
     return lut_result_normed
 
 
-def sample_indices_pixels(pixels, n_samples, uniform=True):
+def sample_uniform_from_histogram(histogram, edges, pixels, indices_pixels, n_samples):
+    indices_bins_r = np.digitize(pixels[..., 0], edges[0]) - 1
+    indices_bins_g = np.digitize(pixels[..., 1], edges[1]) - 1
+    indices_bins_b = np.digitize(pixels[..., 2], edges[2]) - 1
+
+    probability_densities_samples = histogram[indices_bins_r, indices_bins_g, indices_bins_b]
+
+    # counts_samples = histogram[indices_bins_r, indices_bins_g, indices_bins_b]
+    # counts_samples_relative = counts_samples / np.sum(counts_samples)
+    # densities_samples_normalized = densities_samples / np.sum(densities_samples)
+
+    weigths_samples = 1. / probability_densities_samples
+    probabilities_samples = weigths_samples / np.sum(weigths_samples)
+
+    indices_sampled = np.random.choice(indices_pixels, n_samples, p=probabilities_samples, replace=False)
+
+    return indices_sampled
+
+
+def sample_indices_pixels(pixels, n_samples, uniform=True, size_batch_uniform=100000):
     if uniform:
-        histogram, edges = np.histogramdd(pixels, density=False,
-                                          bins=np.tile(np.linspace(0, 256, 10)[np.newaxis, ...], [3, 1]))
+        # Generate sample that is approx. uniformly distributed w.r.t. pixel color values
+        #   to enhance generalization of fitted lut coefficients and hence reduce needed sample size.
+        #   Use histogram to estimate PDF and weight with the inverse
+        bins = np.stack([
+            np.linspace(np.min(pixels[..., 0]), np.max(pixels[..., 0]) + 1e-10, 10),
+            np.linspace(np.min(pixels[..., 1]), np.max(pixels[..., 1]) + 1e-10, 10),
+            np.linspace(np.min(pixels[..., 2]), np.max(pixels[..., 2]) + 1e-10, 10),
+        ],
+            axis=0
+        )
+        histogram, edges = np.histogramdd(pixels, density=True,
+                                          bins=bins)
 
-        indices_bins_r = np.digitize(pixels[..., 0], edges[0]) - 1
-        indices_bins_g = np.digitize(pixels[..., 1], edges[1]) - 1
-        indices_bins_b = np.digitize(pixels[..., 2], edges[2]) - 1
+        if size_batch_uniform is None:
+            indices_pixels = np.arange(0, pixels.shape[0])
+            return sample_uniform_from_histogram(histogram, edges, pixels, indices_pixels, n_samples)
+        else:
+            # Build the dataset consecutively from batches in order to circumvent
+            #   numerical issues for very large images and very common pixel colors
+            indices_list = []
+            indices_pixels = np.arange(0, pixels.shape[0])
+            n_samples_iteration = int(size_batch_uniform / 100.)
+            for i in range(int(np.ceil(n_samples / n_samples_iteration))):
+                indices_pixels_batch = np.random.choice(indices_pixels, size_batch_uniform, p=None)
+                indices_list.append(sample_uniform_from_histogram(
+                    histogram,
+                    edges,
+                    pixels[indices_pixels_batch],
+                    indices_pixels_batch,
+                    n_samples_iteration
+                ))
 
-        counts_samples = histogram[indices_bins_r, indices_bins_g, indices_bins_b]
-        counts_samples_relative = counts_samples / np.sum(counts_samples)
-        # densities_samples_normalized = densities_samples / np.sum(densities_samples)
-
-        weights_samples = 1. / counts_samples_relative
-        probabilities_samples = weights_samples / np.sum(weights_samples)
+            return np.concatenate(indices_list, axis=0)[:n_samples]
     else:
-        probabilities_samples = None
+        indices = np.arange(0, pixels.shape[0])
 
-    indices = np.arange(0, pixels.shape[0])
-    indices_sampled = np.random.choice(indices, n_samples, p=probabilities_samples)
+        indices_sampled = np.random.choice(indices, n_samples, p=None)
 
     return indices_sampled
 
@@ -502,7 +540,7 @@ if __name__ == '__main__':
 
     # lut = main(path_samples, cube_out, level=4, n_pixels_sample=100000)
     #
-    lut = estimate_lut(paths, size=level ** 2, n_pixels_sample=100)
+    lut = estimate_lut(paths, size=level ** 2, n_pixels_sample=100000)
     # lut = identity
 
     ref = Image.open(path_ref_test)
