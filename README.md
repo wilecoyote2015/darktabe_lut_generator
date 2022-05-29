@@ -45,5 +45,25 @@ obtain a sample with approximately uniform distribution over the represented col
 This reduces the needed sample count for good results by approx. an order of magnitude compared to drawing pixels
 uniformly.
 
+# Additional Resources
+
+## About LUTs and color management
+
+https://docs.darktable.org/usermanual/3.8/en/module-reference/processing-modules/lut-3d/
+https://eng.aurelienpierre.com/
+https://library.imageworks.com/pdfs/imageworks-library-cinematic_color.pdf
+
+# Forums
+
+https://discuss.pixls.us/t/how-to-create-haldcluts-from-in-camera-processing-styles/12690
+https://discuss.pixls.us/t/help-me-build-a-lua-script-for-automatically-applying-fujifilm-film-simulations-and-more/30287
+https://discuss.pixls.us/t/creating-3d-cube-luts-for-camera-ooc-styles/30968
+
+# Similar tools
+
+https://github.com/savuori/haldclut_dt
+
+
+
 
 
