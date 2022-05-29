@@ -1,8 +1,8 @@
 This package estimates a .cube 3D lookup table (LUT) for use with the Darktable lut 3D module.
 It was designed to obtain 3D LUTs replicating in-camera jpeg styles.
-This is especially if one shoots large sets of RAW photos (e.g. for commission), where most shall simple
+This is especially useful if one shoots large sets of RAW photos (e.g. for commission), where most shall simply
 resemble the standard out-of-camera (OOC) style when exported by darktable, while still being able to do some quick
-corrections on selected images while mainraining the OOC style.
+corrections on selected images while maintaining the OOC style.
 
 Below is an example using an LUT estimated to match the Provia film simulation on a Fujifilm X-T3.
 First is the OOC Jpeg, second is the RAW processed in Darktable with the LUT and third is the RAW processed in Darktable
@@ -25,7 +25,7 @@ Run:
 For help and further arguments, run
 ```darktable_lut_generator --help```
 
-A direktory with image pairs of one RAW image and the corresponding OOC image (e.g. jpeg) is used as input.
+A directory with image pairs of one RAW image and the corresponding OOC image (e.g. jpeg) is used as input.
 The images should represent a wide variety of colors; ideally, the whole Adobe RGB color space is covered.
 The resulting LUT is intended for application in Adobe RGB color space.
 Hence, it is advisable to also shoot the in-camera jpegs in Adobe RGB in order to cover the whole available gamut.
