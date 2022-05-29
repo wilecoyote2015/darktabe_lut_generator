@@ -55,7 +55,8 @@ parser.add_argument(
     default=100000,
     help='Number of pixels to sample from the images for LUT estimation. '
          'Higher values may produce more accurate results, but are slower and more memory intensive. '
-         'The default value works well. Try 10000 if running out of memory.'
+         'The default value works well. Try 10000 if running out of memory. '
+         'Set to 0 to use all pixels (recommended with resize)'
 )
 parser.add_argument(
     '--level',
@@ -66,12 +67,53 @@ parser.add_argument(
          'performance.'
 )
 parser.add_argument(
+    '--resize',
+    type=int,
+    default=0,
+    help='If provided, the input images are resized to this maximum border length.'
+)
+parser.add_argument(
+    '--is_grayscale',
+    action='store_true',
+    help='Provide this flag if the image style is grayscale. Ensures that the resulting'
+         ' lookup table contains only grayscale values.'
+)
+parser.set_defaults(is_grayscale=False)
+parser.add_argument(
     '--path_dt_cli',
     type=str,
     default=None,
     help='Path to the darktable-cli executable if it is not in PATH.'
 )
+parser.add_argument(
+    '--path_xmp_raw',
+    type=str,
+    default=None,
+    help='Path to an optional xmp file for processing the raw images of the input image pairs. '
+         'Use this, for instance, to use a different color space or a different exposure so that the resulting LUT '
+         'will yield the correct result on a raw with the corresponding modules applied. '
+         'A practical example might be to shoot the sample images in a controlled environment and apply the color'
+         ' calibration module with a color checker on all sample images in order to ensure proper input color space '
+         'transformation.'
+)
+parser.add_argument(
+    '--path_xmp_image',
+    type=str,
+    default=None,
+    help='Path to an optional xmp file for processing the out of camera / processed images of the input image pairs. '
+         'This can be used to use different color spaces, but no further changes should be made to the image.'
+)
 
 args = parser.parse_args()
 
-main(args.dir_images, args.file_lut_output, args.level, args.n_samples, args.path_dt_cli)
+main(
+    args.dir_images,
+    args.file_lut_output,
+    args.level,
+    args.n_samples if args.n_samples > 0 else None,
+    args.is_grayscale,
+    args.resize,
+    args.path_dt_cli,
+    args.path_xmp_image,
+    args.path_xmp_raw,
+)

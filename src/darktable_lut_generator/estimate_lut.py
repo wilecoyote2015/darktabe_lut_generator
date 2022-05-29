@@ -109,7 +109,7 @@ def get_aligned_image_pair(path_reference, path_raw):
     return reference_aligned, raw, mask_result
 
 
-def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample) -> np.ndarray:
+def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grayscale) -> np.ndarray:
     """
     :param filepaths_images: paths of image pairs: [reference, vanilla raw development]
     :return:
@@ -121,7 +121,7 @@ def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample) -> np.nd
         pixels_reference, pixels_raw, max_value = get_pixels_sample_image_pair(
             path_reference,
             path_raw,
-            int(n_pixels_sample / len(filepaths_images))
+            int(n_pixels_sample / len(filepaths_images)) if n_pixels_sample is not None else None
         )
         pixels_raws.append(pixels_raw)
         pixels_references.append(pixels_reference)
@@ -129,7 +129,7 @@ def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample) -> np.nd
     pixels_raws = np.concatenate(pixels_raws, axis=0)
     pixels_references = np.concatenate(pixels_references, axis=0)
 
-    lut_result_normed = perform_estimation_linear_regression(pixels_references, pixels_raws, size)
+    lut_result_normed = perform_estimation_linear_regression(pixels_references, pixels_raws, size, is_grayscale)
 
     return lut_result_normed
 
@@ -148,6 +148,8 @@ def sample_uniform_from_histogram(histogram, edges, pixels, indices_pixels, n_sa
 
 
 def sample_indices_pixels(pixels, n_samples, uniform=True, size_batch_uniform=100000):
+    if n_samples is None:
+        return np.arange(0, pixels.shape[0])
     if uniform:
         # Generate sample that is approx. uniformly distributed w.r.t. pixel color values
         #   to enhance generalization of fitted lut coefficients and hence reduce needed sample size.
@@ -245,7 +247,7 @@ def make_design_matrix(pixels_references, pixels_raws, size):
     return design_matrix
 
 
-def perform_estimation_linear_regression(pixels_references, pixels_raws, size):
+def perform_estimation_linear_regression(pixels_references, pixels_raws, size, is_grayscale):
     design_matrix = make_design_matrix(pixels_references, pixels_raws, size)
 
     print('fitting lookup table coefficients')
@@ -265,9 +267,17 @@ def perform_estimation_linear_regression(pixels_references, pixels_raws, size):
                         - np.matmul(design_matrix, regression.coef_)) ** 2
             ))
         )
-
         lut_difference_channel = np.reshape(regression.coef_, [size, size, size])
-        result[..., idx_channel] += lut_difference_channel
+
+        if is_grayscale:
+            # FIXME: Does not work correctly. Not understood?
+            lut_all_channels = result[..., 0] + lut_difference_channel
+            result[..., 0] = lut_all_channels
+            result[..., 1] = lut_all_channels
+            result[..., 2] = lut_all_channels
+            break
+        else:
+            result[..., idx_channel] += lut_difference_channel
 
     result = np.clip(result, a_min=0., a_max=1.)
 
@@ -290,7 +300,9 @@ def make_lut_identity_normed(size):
 
     return result
 
-def main(dir_images, file_out, level=3, n_pixels_sample=100000, path_dt_exec=None):
+
+def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=False, resize=0, path_dt_exec=None,
+         path_xmp_image=None, path_xmp_raw=None):
     extensions_raw = ['raw', 'raf', 'dng', 'nef', 'cr3', 'arw', 'cr2', 'cr3', 'orf', 'rw2']
     extensions_image = ['jpg', 'jpeg', 'tiff', 'tif', 'png']
 
@@ -320,8 +332,12 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, path_dt_exec=Non
                         [
                             'darktable-cli' if path_dt_exec is None else path_dt_exec,
                             path_image,
-                            str(path_xmp.resolve()),
+                            str(path_xmp.resolve()) if path_xmp_image is None else path_xmp_image,
                             path_out_image,
+                            '--width',
+                            str(resize),
+                            '--height',
+                            str(resize),
                             '--core',
                             '--configdir',
                             path_dir_conf_temp,
@@ -336,8 +352,12 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, path_dt_exec=Non
                         [
                             'darktable-cli' if path_dt_exec is None else path_dt_exec,
                             path_raw,
-                            str(path_xmp.resolve()),
+                            str(path_xmp.resolve()) if path_xmp_raw is None else path_xmp_raw,
                             path_out_raw,
+                            '--width',
+                            str(resize),
+                            '--height',
+                            str(resize),
                             '--core',
                             '--configdir',
                             path_dir_conf_temp,
@@ -350,7 +370,7 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, path_dt_exec=Non
 
         print('Finished converting. Generating LUT.')
         # a halc clut is a cube with level**2 entries on each dimension
-        result = estimate_lut(filepaths_images_converted, level ** 2, n_pixels_sample)
+        result = estimate_lut(filepaths_images_converted, level ** 2, n_pixels_sample, is_grayscale)
 
         write_cube(result, file_out)
 
