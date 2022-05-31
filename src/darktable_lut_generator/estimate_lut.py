@@ -197,7 +197,7 @@ def sample_indices_pixels(pixels, n_samples, uniform=True, size_batch_uniform=10
             indices_pixels = np.arange(0, pixels.shape[0])
             n_samples_iteration = int(size_batch_uniform / 100.)
             for i in range(int(np.ceil(n_samples / n_samples_iteration))):
-                indmainices_pixels_batch = np.random.choice(indices_pixels, size_batch_uniform, p=None)
+                indices_pixels_batch = np.random.choice(indices_pixels, size_batch_uniform, p=None)
                 indices_list.append(sample_uniform_from_histogram(
                     histogram,
                     edges,
