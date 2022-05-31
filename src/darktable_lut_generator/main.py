@@ -50,6 +50,12 @@ parser.add_argument(
     help='Desired filepath to store output 3D .cube LUT (with extension).'
 )
 parser.add_argument(
+    '--color_space_image',
+    type=str,
+    default='sRGB',
+    help='Color space of the (OOC) image. sRGB or AdobeRGB.'
+)
+parser.add_argument(
     '--n_samples',
     type=int,
     default=100000,
@@ -77,12 +83,6 @@ parser.add_argument(
     action='store_true',
     help='Provide this flag if the image style is grayscale. Ensures that the resulting'
          ' lookup table contains only grayscale values.'
-)
-parser.add_argument(
-    '--color_space_image_input',
-    type=str,
-    default='sRGB',
-    help='Color space of the input (OOC) image. either sRGB or AdobeRGB'
 )
 parser.set_defaults(is_grayscale=False)
 parser.add_argument(
@@ -121,13 +121,31 @@ parser.add_argument(
     default=None,
     help='Path to directory to output additional information / plots'
 )
+parser.add_argument(
+    '--make_unreliable_estimates_red',
+    action='store_true',
+    help='In the resulting LUT, make estimates of colors with unreliably few datapoints red.'
+)
+parser.set_defaults(make_unreliable_estimates_red=False)
+parser.add_argument(
+    '--make_unchanged_red',
+    action='store_true',
+    help='In the resulting LUT, make colors that are estimated as unchanged w.r.t. an identity LUT red.'
+)
+parser.set_defaults(make_unchanged_red=False)
+parser.add_argument(
+    '--no_interpolation_unreliable',
+    action='store_true',
+    help='By default, estimates for colors with unreliably few samples are interpolated. Disable this.'
+)
+parser.set_defaults(no_interpolation_unreliable=False)
 
 args = parser.parse_args()
 
 main(
     args.dir_images,
     args.file_lut_output,
-    args.color_space_image_input,
+    args.color_space_image,
     args.level,
     args.n_samples if args.n_samples > 0 else None,
     args.is_grayscale,
@@ -137,4 +155,8 @@ main(
     args.path_xmp_raw,
     args.path_dir_intermediate,
     args.path_dir_out_info,
+    args.make_unreliable_estimates_red,
+    args.make_unchanged_red,
+    not args.no_interpolation_unreliable,
+
 )

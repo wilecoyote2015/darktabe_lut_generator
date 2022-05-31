@@ -18,6 +18,7 @@
 
 import numpy as np
 import cv2
+import scipy.optimize
 from sklearn.linear_model import Lasso, LinearRegression
 import logging
 from tqdm import tqdm
@@ -27,22 +28,20 @@ import subprocess
 from plotly import graph_objects as go
 from importlib.resources import path
 from scipy.spatial import KDTree
+from scipy.optimize import lsq_linear
+from scipy import ndimage
 
 
-# TODO: seems like the transitions to the blues are the problem, not the blues.
-#   nearest neighbor interpolation of unreliable pixels might solve the issue (?)
+# TODO: some boundary colors are off although enough samples are present.
+#   would be nice to optimize with proper spatial regularization w.r.t. the lut colors
+#   (maybe grmf prior)
 
-# TODO: vanilla linear regression setting insecure params to nan.
-#   then use scipy.interpolate.LinearNDInterpolator to interpolate the missing points
-#   within regular grid. extrapolate the remaining points.
-
-# TODO: normalize design matrix for proper inference
-
-# TODO: boundary colors near limit of gamut are problematic for some reason.
-#   check whether the problem is from raw or jpg...
-#   seems problem is where colors in raw image are at boundary. I guess because this means that the same color must be mapped
-#   to different output colors.
-#   this is hence a problem of the intent, I guess.
+# TODO: especially at extreme color valures, there are still outlier estimates
+#   where colors are really off.
+#   how does DT's lut 3D module transform into the application color space?
+#   how are out of gamut colors handled?
+#   is there a problem when exporting the sample images regarding the rendering intent,
+#   so that out-of-gamut values mapping is not bijective?
 
 def align_images_ecc(im1, im2):
     """Align image 1 to image 2.
@@ -130,7 +129,8 @@ def get_aligned_image_pair(path_reference, path_raw, dir_out_info=None):
     return reference_aligned, raw, mask_result
 
 
-def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grayscale, dir_out_info) -> np.ndarray:
+def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grayscale, dir_out_info,
+                 make_insufficient_data_red, make_unchanged_red, interpolate_unreliable) -> np.ndarray:
     """
     :param filepaths_images: paths of image pairs: [reference, vanilla raw development]
     :return:
@@ -151,7 +151,8 @@ def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grays
     pixels_raws = np.concatenate(pixels_raws, axis=0)
     pixels_references = np.concatenate(pixels_references, axis=0)
 
-    lut_result_normed = perform_estimation_lasso(pixels_references, pixels_raws, size, is_grayscale, dir_out_info)
+    lut_result_normed = perform_estimation(pixels_references, pixels_raws, size, is_grayscale, dir_out_info,
+                                           make_insufficient_data_red, make_unchanged_red, interpolate_unreliable)
 
     return lut_result_normed
 
@@ -196,7 +197,7 @@ def sample_indices_pixels(pixels, n_samples, uniform=True, size_batch_uniform=10
             indices_pixels = np.arange(0, pixels.shape[0])
             n_samples_iteration = int(size_batch_uniform / 100.)
             for i in range(int(np.ceil(n_samples / n_samples_iteration))):
-                indices_pixels_batch = np.random.choice(indices_pixels, size_batch_uniform, p=None)
+                indmainices_pixels_batch = np.random.choice(indices_pixels, size_batch_uniform, p=None)
                 indices_list.append(sample_uniform_from_histogram(
                     histogram,
                     edges,
@@ -273,39 +274,108 @@ def calc_is_trustful_estimate(design_matrix, size):
     # TODO: use OLS parameter estimator std error.
     #   Corresponding statistical assumptions are not met,
     #   but should suffice in practice.
+
+    """TODO:
+        calc std error.
+        entries are unreliable if OLS std error is relatively large whereas lasso estimate is 0,
+        meaning that it indicates that coefficient would most probably be non-zero  via OLS but is zero
+        in lasso.
+        Alternative: make OLS and LASSO and drop all coefficients that are zero in lasso but not in OLS.
+    """
     sums_design_matrix = np.sum(np.abs(design_matrix), axis=0)
-    has_enough_data = sums_design_matrix > design_matrix.shape[0] / size ** 3 / 20  # TODO: more sophisticated threshold
+    has_enough_data = sums_design_matrix > design_matrix.shape[0] / size ** 3 / 10  # TODO: more sophisticated threshold
     has_no_data = sums_design_matrix < 1.
 
     return has_enough_data, has_no_data
 
 
+def interpolate_best_missing_lut_entry(lut, indices_sufficient_data, indices_missing_data):
+    lut_result = np.copy(lut)
+
+    n_neighbors_missing_data = []
+    indices_direct_neighbors_missing_entries = []
+    interpolator = KDTree(indices_sufficient_data)
+
+    for idx_missing in indices_missing_data:
+        distances, indices_nearest = interpolator.query(
+            idx_missing,
+            # distance_upper_bound=1.,
+            k=8,
+        )
+        indices_direct_neighbors_ = indices_nearest[distances == 1.]
+        n_direct_neighbors = indices_direct_neighbors_.shape[0]
+        n_neighbors_missing_data.append(n_direct_neighbors)
+        indices_direct_neighbors_missing_entries.append(indices_direct_neighbors_)
+
+    idx_index_missing_most_direct_neighbors = np.argmax(n_neighbors_missing_data)
+    index_missing_most_direct_neighbors = indices_missing_data[idx_index_missing_most_direct_neighbors]
+
+    indices_missing_result = np.asarray([
+        index_missing
+        for idx, index_missing in enumerate(indices_missing_data)
+        if idx != idx_index_missing_most_direct_neighbors
+    ])
+    indices_sufficient_data_result = np.concatenate([
+        index_missing_most_direct_neighbors[np.newaxis, ...],
+        indices_sufficient_data
+    ])
+
+    # indices of the direct neighbor of the missing lut entry that shall be interpolated.
+    indices_direct_neighbors = indices_sufficient_data[
+        indices_direct_neighbors_missing_entries[
+            idx_index_missing_most_direct_neighbors
+        ]
+    ]
+    direct_neighbors = np.asarray([lut[i[0], i[1], i[2]] for i in indices_direct_neighbors])
+    # lut_result[index_missing_most_direct_neighbors] = np.mean(direct_neighbors, axis=0)
+    lut_result[
+        index_missing_most_direct_neighbors[0],
+        index_missing_most_direct_neighbors[1],
+        index_missing_most_direct_neighbors[2],
+    ] = np.mean(direct_neighbors, axis=0)
+    # ] = np.asarray([1, 0, 0])
+
+    return lut_result, indices_sufficient_data_result, indices_missing_result
+
 def interpolate_unreliable_lut_entries(design_matrix, lut):
-    # TODO / FIXME: important to get statistically signifant bad entries properly!!
-    # TODO: average neighbors with same distance
-    coordinates = make_meshgrid_cube_coordinates(lut.shape[0]).reshape([lut.shape[0] ** 3, 3])
+    indices_lut = make_meshgrid_cube_coordinates(lut.shape[0]).reshape([lut.shape[0] ** 3, 3])
     has_enough_data, has_no_data = calc_is_trustful_estimate(design_matrix, lut.shape[0])
 
     indices_invalid = np.logical_not(has_enough_data)
     # indices_invalid = has_no_data
 
-    indices_missing = np.argwhere(indices_invalid.reshape(lut.shape[:3]))
-    coordinates_enough_data = coordinates[np.logical_not(indices_invalid)]
-    interpolator = KDTree(coordinates_enough_data)
+    indices_missing_data = np.argwhere(indices_invalid.reshape(lut.shape[:3]))
+    indices_sufficient_data = indices_lut[np.logical_not(indices_invalid)]
+
+    result = lut
+    while indices_missing_data.shape[0]:
+        result, indices_sufficient_data, indices_missing_data = interpolate_best_missing_lut_entry(
+            result,
+            indices_sufficient_data,
+            indices_missing_data,
+        )
+
+    return result
+
+    interpolator = KDTree(indices_sufficient_data)
 
     result = np.copy(lut)
 
-    for idx_missing in indices_missing:
-        distances, idndices_nearest = interpolator.query(
+    for idx_missing in indices_missing_data:
+        distances, indices_nearest = interpolator.query(
             idx_missing,
             # distance_upper_bound=1.,
             k=8,
         )
         distance_min = distances[0]
-        indices_nearest = idndices_nearest[distances == distance_min]
+        indices_nearest = indices_nearest[distances == distance_min]
         # TODO: properly get real neighbors
-        neighbors = lut[coordinates_enough_data[indices_nearest]]
-        result[idx_missing] = np.mean(neighbors, axis=0)
+        neighbors = np.asarray([lut[i[0], i[1], i[2]] for i in indices_sufficient_data[indices_nearest]])
+        result[
+            idx_missing[0],
+            idx_missing[1],
+            idx_missing[2]
+        ] = np.mean(neighbors, axis=0)
 
     return result
 
@@ -316,7 +386,10 @@ def save_info_lasso(lut, design_matrix, dir_out_info):
     identity = make_lut_identity_normed(lut.shape[0])
     coords = identity.reshape(lut.shape[0] ** 3, 3)
 
-    colors_mapped = [f'rgb({x[0] * 255},{x[1] * 255},{x[2] * 255})' for x in lut.reshape((lut.shape[0] ** 3, 3))]
+    lut_rounded = np.round(lut, 2)
+
+    colors_mapped = [f'rgb({x[0] * 255},{x[1] * 255},{x[2] * 255})' for x in
+                     lut_rounded.reshape((lut_rounded.shape[0] ** 3, 3))]
     colors_coordinates = [f'rgb({x[0] * 255},{x[1] * 255},{x[2] * 255})' for x in coords]
 
     fig = go.Figure()
@@ -372,9 +445,100 @@ def save_info_lasso(lut, design_matrix, dir_out_info):
     # 3d Cube where outline is whether data is missing
 
 
-def perform_estimation_lasso(pixels_references, pixels_raws, size, is_grayscale, dir_out_info=None,
-                             make_insufficient_data_red=False,
-                             make_unchanged_red=False, interpolate_unreliable=True):
+def fit_channel_smoothness_penalty(design_matrix, differences_references_raw_channel, idx_channel, size):
+    print(f'Fitting channel {idx_channel}')
+    stds = np.std(design_matrix, axis=0)
+    stds[stds == 0] = 1.
+    identity = make_lut_identity_normed(size)
+
+    design_matrix_scaled = design_matrix / stds[np.newaxis, ...]
+
+    bounds_lower = (-1 * identity[..., idx_channel].reshape([size ** 3]))
+    bounds_lower_scaled = bounds_lower * stds
+    bounds_upper = (1. - identity[..., idx_channel]).reshape([size ** 3])
+    bounds_upper_scaled = bounds_upper * stds
+
+    bounds_list = [(bounds_lower_scaled[idx], bounds_upper_scaled[idx]) for idx in range(size ** 3)]
+
+    # regression = LinearRegression(fit_intercept=False)
+
+    def loss(coeffs):
+        regularization_strength = 1e-5
+        estimate = np.matmul(design_matrix_scaled, coeffs)
+        mse = np.mean((differences_references_raw_channel - estimate) ** 2)
+        coeffs_rescaled = coeffs / stds
+        array_changes = coeffs_rescaled.reshape((size, size, size))
+        grad_magnitude = ndimage.generic_gradient_magnitude(array_changes, ndimage.sobel)
+        penalty = np.mean(grad_magnitude ** 2)
+
+        result = mse + penalty * regularization_strength
+
+        # print(f'mse: {mse}, penalty term: {penalty * regularization_strength}, result: {result}')
+        # print(penalty)
+        # print(result)
+
+        return result
+
+    print('Fitting OLS start parameters')
+    params_start = lsq_linear(design_matrix_scaled, differences_references_raw_channel,
+                              (bounds_lower_scaled, bounds_upper_scaled)).x
+
+    print('Fitting regularized least squares')
+    result = scipy.optimize.minimize(
+        loss,
+        params_start,
+        method='Powell',
+        bounds=bounds_list,
+        callback=lambda x_: print(loss(x_))
+        # tol=1e-2
+    )
+
+    coeffs_rescaled = result.x / stds
+
+    return coeffs_rescaled
+
+
+def fit_channel_constrained(design_matrix, differences_references_raw_channel, idx_channel, size):
+    stds = np.std(design_matrix, axis=0)
+    stds[stds == 0] = 1.
+    identity = make_lut_identity_normed(size)
+
+    design_matrix_scaled = design_matrix / stds[np.newaxis, ...]
+
+    bounds_lower = (-1 * identity[..., idx_channel].reshape([size ** 3]))
+    bounds_lower_scaled = bounds_lower * stds
+    bounds_upper = (1. - identity[..., idx_channel]).reshape([size ** 3])
+    bounds_upper_scaled = bounds_upper * stds
+
+    # regression = LinearRegression(fit_intercept=False)
+    result_opt = lsq_linear(design_matrix_scaled, differences_references_raw_channel,
+                            (bounds_lower_scaled, bounds_upper_scaled))
+    coeffs_rescaled = result_opt.x / stds
+
+    return coeffs_rescaled
+
+
+def fit_channel_lasso(design_matrix, differences_references_raw_channel, idx_channel, size):
+    stds = np.std(design_matrix, axis=0)
+    stds[stds == 0] = 1.
+
+    design_matrix_scaled = design_matrix / stds[np.newaxis, ...]
+    regression = Lasso(
+        alpha=1e-6,
+        fit_intercept=False,
+        tol=1e-4,
+        selection='random'
+    )
+    # regression = LinearRegression(fit_intercept=False)
+    regression.fit(design_matrix_scaled, differences_references_raw_channel)
+    coeffs_rescaled = regression.coef_ / stds
+
+    return coeffs_rescaled
+
+
+def perform_estimation(pixels_references, pixels_raws, size, is_grayscale, dir_out_info=None,
+                       make_insufficient_data_red=False,
+                       make_unchanged_red=False, interpolate_unreliable=True):
     design_matrix = make_design_matrix(pixels_references, pixels_raws, size)
 
     print('fitting lookup table coefficients')
@@ -384,24 +548,28 @@ def perform_estimation_lasso(pixels_references, pixels_raws, size, is_grayscale,
     rmse_pre_channnels = []
     rmse_past_channels = []
     changes = np.zeros_like(result)
+
+    stds = np.std(design_matrix, axis=0)
+    stds[stds == 0] = 1.
+
     for idx_channel in range(3):
         rmse_pre_channnels.append(np.sqrt(np.mean(differences_references_raw[..., idx_channel] ** 2)))
-        regression = Lasso(
-            alpha=1e-7,
-            fit_intercept=False,
-            tol=1e-4,
-            selection='random'
+
+        coefficients = fit_channel_constrained(
+            design_matrix,
+            differences_references_raw[..., idx_channel],
+            idx_channel,
+            size
         )
-        # regression = LinearRegression(fit_intercept=False)
-        regression.fit(design_matrix, differences_references_raw[..., idx_channel])
+
         rmse_past_channels.append(
             np.sqrt(np.mean(
                 (
                         differences_references_raw[..., idx_channel]
-                        - np.matmul(design_matrix, regression.coef_)) ** 2
+                        - np.matmul(design_matrix, coefficients)) ** 2
             ))
         )
-        lut_difference_channel = np.reshape(regression.coef_, [size, size, size])
+        lut_difference_channel = np.reshape(coefficients, [size, size, size])
 
         # todo: refactor to use changes array after loop to fill result
         if is_grayscale:
@@ -468,11 +636,20 @@ def make_lut_identity_normed(size):
     return result
 
 
-def main(dir_images, file_out, color_space_image_input, level=3, n_pixels_sample=100000, is_grayscale=False, resize=0,
+def main(dir_images, file_out, color_space_image, level=3, n_pixels_sample=100000, is_grayscale=False, resize=0,
          path_dt_exec=None,
-         path_xmp_image=None, path_xmp_raw=None, path_dir_intermediate=None, dir_out_info=None):
+         path_xmp_image=None, path_xmp_raw=None, path_dir_intermediate=None, dir_out_info=None,
+         make_insufficient_data_red=False, make_unchanged_red=False, interpolate_unreliable=True):
     extensions_raw = ['raw', 'raf', 'dng', 'nef', 'cr3', 'arw', 'cr2', 'cr3', 'orf', 'rw2']
     extensions_image = ['jpg', 'jpeg', 'tiff', 'tif', 'png']
+
+    names_xmps_image = {
+        'sRGB': 'image_input_srgb.xmp',
+        'AdobeRGB': 'image_input_adobe_rgb.xmp',
+    }
+
+    if color_space_image not in names_xmps_image:
+        raise ValueError(f'Image color space {color_space_image} not in allowed: {list(names_xmps_image.keys())}')
 
     pairs_images = []
     for filename_raw in os.listdir(dir_images):
@@ -513,7 +690,7 @@ def main(dir_images, file_out, color_space_image_input, level=3, n_pixels_sample
                     '--library',
                     ':memory:'
                 ]
-                with path('darktable_lut_generator.styles', 'image.xmp') as path_xmp:
+                with path('darktable_lut_generator.styles', names_xmps_image[color_space_image]) as path_xmp:
                     subprocess.call(
                         [
                             'darktable-cli' if path_dt_exec is None else path_dt_exec,
@@ -540,7 +717,8 @@ def main(dir_images, file_out, color_space_image_input, level=3, n_pixels_sample
 
         print('Finished converting. Generating LUT.')
         # a halc clut is a cube with level**2 entries on each dimension
-        result = estimate_lut(filepaths_images_converted, level ** 2, n_pixels_sample, is_grayscale, dir_out_info)
+        result = estimate_lut(filepaths_images_converted, level ** 2, n_pixels_sample, is_grayscale, dir_out_info,
+                              make_insufficient_data_red, make_unchanged_red, interpolate_unreliable)
 
         write_cube(result, file_out)
 
