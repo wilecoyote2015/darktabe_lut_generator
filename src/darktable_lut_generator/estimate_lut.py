@@ -327,22 +327,30 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
             print(f'converting image {os.path.basename(path_image)}')
             # TODO: make temporary config and memory db work
             with tempfile.TemporaryDirectory() as path_dir_conf_temp:
-                with path('darktable_lut_generator.styles', 'image.xmp') as path_xmp:
+                args_common = [
+                    '--width',
+                    str(resize),
+                    '--height',
+                    str(resize),
+                    # '--icc-type',
+                    # 'LIN_REC2020',
+                    # '--icc-intent',
+                    # 'ABSOLUTE_COLORIMETRIC',
+                    '--style-overwrite',
+                    '--core',
+                    '--configdir',
+                    path_dir_conf_temp,
+                    '--library',
+                    ':memory:'
+                ]
+                with path('darktable_lut_generator.styles', 'image_input_srgb.xmp') as path_xmp:
                     subprocess.call(
                         [
                             'darktable-cli' if path_dt_exec is None else path_dt_exec,
                             path_image,
                             str(path_xmp.resolve()) if path_xmp_image is None else path_xmp_image,
                             path_out_image,
-                            '--width',
-                            str(resize),
-                            '--height',
-                            str(resize),
-                            '--core',
-                            '--configdir',
-                            path_dir_conf_temp,
-                            '--library',
-                            ':memory:'
+                            *args_common
                         ]
                     )
                 print(f'converting raw {os.path.basename(path_raw)}')
@@ -354,15 +362,7 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
                             path_raw,
                             str(path_xmp.resolve()) if path_xmp_raw is None else path_xmp_raw,
                             path_out_raw,
-                            '--width',
-                            str(resize),
-                            '--height',
-                            str(resize),
-                            '--core',
-                            '--configdir',
-                            path_dir_conf_temp,
-                            '--library',
-                            ':memory:'
+                            *args_common
                         ]
                     )
 
