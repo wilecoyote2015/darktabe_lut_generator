@@ -25,12 +25,17 @@ setuptools.setup(
     python_requires=">=3.7",
     include_package_data=True,
     entry_points={
-        'console_scripts': ['darktable_lut_generator=darktable_lut_generator.main:main']
+        'console_scripts': [
+            'darktable_lut_generator=darktable_lut_generator.main:main',
+            'darktable_lut_generate_pattern=darktable_lut_generator.make_rgb_image:main'
+        ]
     },
     install_requires=[
         'numpy',
         'sklearn',
         'opencv-python',
-        'tqdm'
+        'tqdm',
+        'plotly',
+        'pandas'
     ]
 )
