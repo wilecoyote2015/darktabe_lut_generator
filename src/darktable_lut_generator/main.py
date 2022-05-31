@@ -76,7 +76,7 @@ parser.add_argument(
 parser.add_argument(
     '--resize',
     type=int,
-    default=0,
+    default=1000,
     help='If provided, the input images are resized to this maximum border length.'
 )
 parser.add_argument(
