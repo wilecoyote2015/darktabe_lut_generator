@@ -1,5 +1,24 @@
 import cv2
 import numpy as np
+import argparse
+
+parser = argparse.ArgumentParser(
+    # description='Generate .cube 3D LUT from jpg/raw sample pairs',
+    usage='Generate simple test pattern for out-of-camera style estimation.'
+          'Display the generated pattern on a wide-gamut screen (OLED smartphone '
+          'with vivid color settings is fine).'
+          ' Take approx. 5 photos  of the screen with different exposure compensation values'
+          ' wit RAW+JPEG setting. Those photos should provide a good input for the LUT estimation.'
+          ' However, additional real-world sample images help, too.'
+)
+
+parser.add_argument(
+    'file_output',
+    type=str,
+    help='Desired filepath to store output image (with extension).'
+)
+
+args = parser.parse_args()
 
 max_ = 2 ** 8 - 1
 
@@ -49,6 +68,4 @@ for idx_luma_band in range(n_luma_bands):
     idx_start = idx_luma_band * luma_band.shape[0]
     result[idx_start: idx_start + luma_band.shape[0]] = luma_band * brightness_factor
 
-cv2.imwrite('test.png', result.astype(np.uint8))
-
-pass
+cv2.imwrite(args.file_output, result.astype(np.uint8))
