@@ -18,13 +18,31 @@
 
 import numpy as np
 import cv2
-from sklearn.linear_model import Lasso
+from sklearn.linear_model import Lasso, LinearRegression
 import logging
 from tqdm import tqdm
 import tempfile
 import os
 import subprocess
+from plotly import graph_objects as go
 from importlib.resources import path
+from scipy.spatial import KDTree
+
+
+# TODO: seems like the transitions to the blues are the problem, not the blues.
+#   nearest neighbor interpolation of unreliable pixels might solve the issue (?)
+
+# TODO: vanilla linear regression setting insecure params to nan.
+#   then use scipy.interpolate.LinearNDInterpolator to interpolate the missing points
+#   within regular grid. extrapolate the remaining points.
+
+# TODO: normalize design matrix for proper inference
+
+# TODO: boundary colors near limit of gamut are problematic for some reason.
+#   check whether the problem is from raw or jpg...
+#   seems problem is where colors in raw image are at boundary. I guess because this means that the same color must be mapped
+#   to different output colors.
+#   this is hence a problem of the intent, I guess.
 
 def align_images_ecc(im1, im2):
     """Align image 1 to image 2.
@@ -86,7 +104,7 @@ def get_max_value(image: np.ndarray):
         raise NotImplementedError
 
 
-def get_aligned_image_pair(path_reference, path_raw):
+def get_aligned_image_pair(path_reference, path_raw, dir_out_info=None):
     reference = cv2.cvtColor(cv2.imread(path_reference, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
     raw = cv2.cvtColor(cv2.imread(path_raw, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
 
@@ -103,13 +121,16 @@ def get_aligned_image_pair(path_reference, path_raw):
     )
     print('Finished alignment')
     mask_result = mask == get_max_value(reference)
-    # mix = 0.5 * reference_aligned + 0.5 * np.asarray(raw)
-    # cv2.imwrite(os.path.join('..', 'output', os.path.basename(path_reference)), mix)
+    if dir_out_info is not None:
+        mix = 0.5 * reference_aligned + 0.5 * raw
+        cv2.imwrite(os.path.join(dir_out_info, f'{os.path.basename(path_reference)}_align_mix.png'), mix)
+        cv2.imwrite(os.path.join(dir_out_info, f'{os.path.basename(path_reference)}_align_raw.png'), raw)
+        cv2.imwrite(os.path.join(dir_out_info, f'{os.path.basename(path_reference)}_align_image.png'), reference)
 
     return reference_aligned, raw, mask_result
 
 
-def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grayscale) -> np.ndarray:
+def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grayscale, dir_out_info) -> np.ndarray:
     """
     :param filepaths_images: paths of image pairs: [reference, vanilla raw development]
     :return:
@@ -121,7 +142,8 @@ def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grays
         pixels_reference, pixels_raw, max_value = get_pixels_sample_image_pair(
             path_reference,
             path_raw,
-            int(n_pixels_sample / len(filepaths_images)) if n_pixels_sample is not None else None
+            int(n_pixels_sample / len(filepaths_images)) if n_pixels_sample is not None else None,
+            dir_out_info
         )
         pixels_raws.append(pixels_raw)
         pixels_references.append(pixels_reference)
@@ -129,7 +151,7 @@ def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grays
     pixels_raws = np.concatenate(pixels_raws, axis=0)
     pixels_references = np.concatenate(pixels_references, axis=0)
 
-    lut_result_normed = perform_estimation_linear_regression(pixels_references, pixels_raws, size, is_grayscale)
+    lut_result_normed = perform_estimation_lasso(pixels_references, pixels_raws, size, is_grayscale, dir_out_info)
 
     return lut_result_normed
 
@@ -191,8 +213,8 @@ def sample_indices_pixels(pixels, n_samples, uniform=True, size_batch_uniform=10
     return indices_sampled
 
 
-def get_pixels_sample_image_pair(path_reference, path_raw, n_samples):
-    reference, raw, mask = get_aligned_image_pair(path_reference, path_raw)
+def get_pixels_sample_image_pair(path_reference, path_raw, n_samples, dir_out_info):
+    reference, raw, mask = get_aligned_image_pair(path_reference, path_raw, dir_out_info)
     max_value = get_max_value(reference)
 
     pixels_reference = np.reshape(
@@ -247,7 +269,112 @@ def make_design_matrix(pixels_references, pixels_raws, size):
     return design_matrix
 
 
-def perform_estimation_linear_regression(pixels_references, pixels_raws, size, is_grayscale):
+def calc_is_trustful_estimate(design_matrix, size):
+    # TODO: use OLS parameter estimator std error.
+    #   Corresponding statistical assumptions are not met,
+    #   but should suffice in practice.
+    sums_design_matrix = np.sum(np.abs(design_matrix), axis=0)
+    has_enough_data = sums_design_matrix > design_matrix.shape[0] / size ** 3 / 20  # TODO: more sophisticated threshold
+    has_no_data = sums_design_matrix < 1.
+
+    return has_enough_data, has_no_data
+
+
+def interpolate_unreliable_lut_entries(design_matrix, lut):
+    # TODO / FIXME: important to get statistically signifant bad entries properly!!
+    # TODO: average neighbors with same distance
+    coordinates = make_meshgrid_cube_coordinates(lut.shape[0]).reshape([lut.shape[0] ** 3, 3])
+    has_enough_data, has_no_data = calc_is_trustful_estimate(design_matrix, lut.shape[0])
+
+    indices_invalid = np.logical_not(has_enough_data)
+    # indices_invalid = has_no_data
+
+    indices_missing = np.argwhere(indices_invalid.reshape(lut.shape[:3]))
+    coordinates_enough_data = coordinates[np.logical_not(indices_invalid)]
+    interpolator = KDTree(coordinates_enough_data)
+
+    result = np.copy(lut)
+
+    for idx_missing in indices_missing:
+        distances, idndices_nearest = interpolator.query(
+            idx_missing,
+            # distance_upper_bound=1.,
+            k=8,
+        )
+        distance_min = distances[0]
+        indices_nearest = idndices_nearest[distances == distance_min]
+        # TODO: properly get real neighbors
+        neighbors = lut[coordinates_enough_data[indices_nearest]]
+        result[idx_missing] = np.mean(neighbors, axis=0)
+
+    return result
+
+
+def save_info_lasso(lut, design_matrix, dir_out_info):
+    # Make 3d cube plot where outline is coordinate of lut node and inner color is mapped color
+
+    identity = make_lut_identity_normed(lut.shape[0])
+    coords = identity.reshape(lut.shape[0] ** 3, 3)
+
+    colors_mapped = [f'rgb({x[0] * 255},{x[1] * 255},{x[2] * 255})' for x in lut.reshape((lut.shape[0] ** 3, 3))]
+    colors_coordinates = [f'rgb({x[0] * 255},{x[1] * 255},{x[2] * 255})' for x in coords]
+
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Scatter3d(
+            x=coords[..., 0],
+            y=coords[..., 1],
+            z=coords[..., 2],
+            mode='markers',
+            marker=dict(
+                line=dict(
+                    width=5,
+                    color=colors_mapped
+                ),
+                color=colors_coordinates
+            ),
+        ),
+    )
+    # fig.show()
+
+    fig.write_html(os.path.join(dir_out_info, 'lut.html'))
+
+    has_enough_data, has_no_data = calc_is_trustful_estimate(design_matrix, lut.shape[0])
+    colors_valid = []
+    for has_enough_data_, has_no_data_ in zip(has_enough_data, has_no_data):
+        colors_valid.append(
+            'rgb(0,255,0)' if has_enough_data_ else 'rgb(255,0,0)' if has_no_data_ else 'rgb(255,255,0)'
+        )
+    # colors_valid = ['rgb(0,255,0)' if x else 'rgb(255,0,0)' for x in has_enough_data]
+
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Scatter3d(
+            x=coords[..., 0],
+            y=coords[..., 1],
+            z=coords[..., 2],
+            mode='markers',
+            marker=dict(
+                line=dict(
+                    width=3,
+                    color=colors_valid
+                ),
+                color=colors_coordinates
+            ),
+        ),
+    )
+    # fig.show()
+
+    fig.write_html(os.path.join(dir_out_info, 'lut_no_datapoints.html'))
+
+    # 3d Cube where outline is whether data is missing
+
+
+def perform_estimation_lasso(pixels_references, pixels_raws, size, is_grayscale, dir_out_info=None,
+                             make_insufficient_data_red=False,
+                             make_unchanged_red=False, interpolate_unreliable=True):
     design_matrix = make_design_matrix(pixels_references, pixels_raws, size)
 
     print('fitting lookup table coefficients')
@@ -256,9 +383,16 @@ def perform_estimation_linear_regression(pixels_references, pixels_raws, size, i
     differences_references_raw = pixels_references - pixels_raws
     rmse_pre_channnels = []
     rmse_past_channels = []
+    changes = np.zeros_like(result)
     for idx_channel in range(3):
         rmse_pre_channnels.append(np.sqrt(np.mean(differences_references_raw[..., idx_channel] ** 2)))
-        regression = Lasso(alpha=1e-6, fit_intercept=False)
+        regression = Lasso(
+            alpha=1e-7,
+            fit_intercept=False,
+            tol=1e-4,
+            selection='random'
+        )
+        # regression = LinearRegression(fit_intercept=False)
         regression.fit(design_matrix, differences_references_raw[..., idx_channel])
         rmse_past_channels.append(
             np.sqrt(np.mean(
@@ -269,22 +403,55 @@ def perform_estimation_linear_regression(pixels_references, pixels_raws, size, i
         )
         lut_difference_channel = np.reshape(regression.coef_, [size, size, size])
 
+        # todo: refactor to use changes array after loop to fill result
         if is_grayscale:
-            # FIXME: Does not work correctly. Not understood?
             lut_all_channels = result[..., 0] + lut_difference_channel
             result[..., 0] = lut_all_channels
             result[..., 1] = lut_all_channels
             result[..., 2] = lut_all_channels
+            changes[..., 0] = lut_difference_channel
+            changes[..., 1] = lut_difference_channel
+            changes[..., 2] = lut_difference_channel
             break
         else:
+            changes[..., idx_channel] = lut_difference_channel
             result[..., idx_channel] += lut_difference_channel
 
+    if interpolate_unreliable:
+        result = interpolate_unreliable_lut_entries(design_matrix, result)
+
     result = np.clip(result, a_min=0., a_max=1.)
+
+    if make_unchanged_red:
+        result[np.sqrt(np.sum(changes ** 2, axis=-1)) < 0.001] = np.asarray([1., 0., 0.])
+
+    # ### TODO: just for testing
+    if make_insufficient_data_red:
+        has_enough_data, has_no_data = calc_is_trustful_estimate(design_matrix, size)
+        has_enough_data = has_enough_data.reshape([size, size, size])
+        result[np.logical_not(has_enough_data)] = np.asarray([1., 0., 0.])
+    # ###
+
+    if dir_out_info is not None:
+        save_info_lasso(result, design_matrix, dir_out_info)
 
     print(f'channels rmse without lut: {rmse_pre_channnels}')
     print(f'channels rmse with fitted lut: {rmse_past_channels}')
 
     return result
+
+
+def make_meshgrid_cube_coordinates(size):
+    return np.stack(
+        np.meshgrid(
+            *([
+                  np.arange(0, size)[np.newaxis, ...],
+              ] * 3),
+            indexing='ij'
+        ),
+        axis=-1
+    )
+
 
 def make_lut_identity_normed(size):
     # identity with [r,g,b, channel]
@@ -301,8 +468,9 @@ def make_lut_identity_normed(size):
     return result
 
 
-def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=False, resize=0, path_dt_exec=None,
-         path_xmp_image=None, path_xmp_raw=None):
+def main(dir_images, file_out, color_space_image_input, level=3, n_pixels_sample=100000, is_grayscale=False, resize=0,
+         path_dt_exec=None,
+         path_xmp_image=None, path_xmp_raw=None, path_dir_intermediate=None, dir_out_info=None):
     extensions_raw = ['raw', 'raf', 'dng', 'nef', 'cr3', 'arw', 'cr2', 'cr3', 'orf', 'rw2']
     extensions_image = ['jpg', 'jpeg', 'tiff', 'tif', 'png']
 
@@ -319,13 +487,15 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
 
     # use darktable to generate images
     with tempfile.TemporaryDirectory() as path_dir_temp:
+        if path_dir_intermediate is not None:
+            path_dir_temp = path_dir_intermediate
         filepaths_images_converted = []
 
         for path_image, path_raw in pairs_images:
             path_out_image = os.path.join(path_dir_temp, os.path.basename(path_image) + '.png')
             path_out_raw = os.path.join(path_dir_temp, os.path.basename(path_raw) + '.png')
             print(f'converting image {os.path.basename(path_image)}')
-            # TODO: make temporary config and memory db work
+
             with tempfile.TemporaryDirectory() as path_dir_conf_temp:
                 args_common = [
                     '--width',
@@ -370,7 +540,7 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
 
         print('Finished converting. Generating LUT.')
         # a halc clut is a cube with level**2 entries on each dimension
-        result = estimate_lut(filepaths_images_converted, level ** 2, n_pixels_sample, is_grayscale)
+        result = estimate_lut(filepaths_images_converted, level ** 2, n_pixels_sample, is_grayscale, dir_out_info)
 
         write_cube(result, file_out)
 

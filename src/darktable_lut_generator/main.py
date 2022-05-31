@@ -78,6 +78,12 @@ parser.add_argument(
     help='Provide this flag if the image style is grayscale. Ensures that the resulting'
          ' lookup table contains only grayscale values.'
 )
+parser.add_argument(
+    '--color_space_image_input',
+    type=str,
+    default='sRGB',
+    help='Color space of the input (OOC) image. either sRGB or AdobeRGB'
+)
 parser.set_defaults(is_grayscale=False)
 parser.add_argument(
     '--path_dt_cli',
@@ -103,12 +109,25 @@ parser.add_argument(
     help='Path to an optional xmp file for processing the out of camera / processed images of the input image pairs. '
          'This can be used to use different color spaces, but no further changes should be made to the image.'
 )
+parser.add_argument(
+    '--path_dir_intermediate',
+    type=str,
+    default=None,
+    help='Path to directory where intermediate converted images are stored..'
+)
+parser.add_argument(
+    '--path_dir_out_info',
+    type=str,
+    default=None,
+    help='Path to directory to output additional information / plots'
+)
 
 args = parser.parse_args()
 
 main(
     args.dir_images,
     args.file_lut_output,
+    args.color_space_image_input,
     args.level,
     args.n_samples if args.n_samples > 0 else None,
     args.is_grayscale,
@@ -116,4 +135,6 @@ main(
     args.path_dt_cli,
     args.path_xmp_image,
     args.path_xmp_raw,
+    args.path_dir_intermediate,
+    args.path_dir_out_info,
 )

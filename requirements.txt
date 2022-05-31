@@ -2,3 +2,5 @@ numpy
 sklearn
 opencv-python
 tqdm
+pandas
+plotly
