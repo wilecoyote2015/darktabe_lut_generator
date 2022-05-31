@@ -165,7 +165,7 @@ def sample_uniform_from_histogram(histogram, edges, pixels, indices_pixels, n_sa
     probability_densities_samples = histogram[indices_bins_r, indices_bins_g, indices_bins_b]
     weigths_samples = 1. / probability_densities_samples
     probabilities_samples = weigths_samples / np.sum(weigths_samples)
-    indices_sampled = np.random.choice(indices_pixels, n_samples, p=probabilities_samples, replace=False)
+    indices_sampled = np.random.choice(indices_pixels, n_samples, p=probabilities_samples)
 
     return indices_sampled
 
