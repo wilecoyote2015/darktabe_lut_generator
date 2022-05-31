@@ -343,7 +343,7 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
                     '--library',
                     ':memory:'
                 ]
-                with path('darktable_lut_generator.styles', 'image_input_srgb.xmp') as path_xmp:
+                with path('darktable_lut_generator.styles', 'image.xmp') as path_xmp:
                     subprocess.call(
                         [
                             'darktable-cli' if path_dt_exec is None else path_dt_exec,
