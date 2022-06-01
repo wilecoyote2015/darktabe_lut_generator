@@ -619,11 +619,18 @@ def make_lut_identity_normed(size):
 
     return result
 
+def get_name_style(path_style):
+    with open(path_style) as f:
+        str_style = f.read()
+
+    return str_style.split('<name>')[1].split('</name>')[0]
+
 
 def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=False, resize=0,
          path_dt_exec=None,
          path_style_image=None, path_style_raw=None, path_dir_intermediate=None, dir_out_info=None,
-         make_insufficient_data_red=False, make_unchanged_red=False, interpolate_unreliable=True):
+         make_insufficient_data_red=False, make_unchanged_red=False, interpolate_unreliable=True,
+         use_lens_correction=True):
     extensions_raw = ['raw', 'raf', 'dng', 'nef', 'cr3', 'arw', 'cr2', 'cr3', 'orf', 'rw2']
     extensions_image = ['jpg', 'jpeg', 'tiff', 'tif', 'png']
 
@@ -655,10 +662,15 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
 
         with path('darktable_lut_generator.styles', 'image.dtstyle') as path_style_image_default:
             path_style_image = path_style_image if path_style_image is not None else path_style_image_default
-            shutil.copyfile(path_style_image, os.path.join(path_styles_temp, 'image.dtstyle'))
-        with path('darktable_lut_generator.styles', 'raw.dtstyle') as path_style_raw_default:
+            path_style_image_temp = os.path.join(path_styles_temp, 'image.dtstyle')
+            shutil.copyfile(path_style_image, path_style_image_temp)
+        with path(
+                'darktable_lut_generator.styles',
+                ('raw_lens_correction.dtstyle' if use_lens_correction else 'raw.dtstyle')
+        ) as path_style_raw_default:
             path_style_raw = path_style_raw if path_style_raw is not None else path_style_raw_default
-            shutil.copyfile(path_style_raw, os.path.join(path_styles_temp, 'raw.dtstyle'))
+            path_style_raw_temp = os.path.join(path_styles_temp, 'raw.dtstyle')
+            shutil.copyfile(path_style_raw, path_style_raw_temp)
 
         args_common = [
             '--width',
@@ -695,10 +707,10 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
                 path_in_image,
                 path_out_image,
                 '--style',
-                'image',
+                get_name_style(path_style_image_temp),
                 *args_common,
                 "--luacmd",
-                f"local dt = require \"darktable\"; dt.styles.import(\"{path_style_image}\")"
+                f"local dt = require \"darktable\"; dt.styles.import(\"{path_style_image_temp}\")"
             ]
             print(' '.join(args))
             subprocess.call(
@@ -712,10 +724,10 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
                 path_in_raw,
                 path_out_raw,
                 '--style',
-                'raw',
+                get_name_style(path_style_raw_temp),
                 *args_common,
                 "--luacmd",
-                f"local dt = require \"darktable\"; dt.styles.import(\"{path_style_raw}\")"
+                f"local dt = require \"darktable\"; dt.styles.import(\"{path_style_raw_temp}\")"
             ]
             print(' '.join(args))
             subprocess.call(

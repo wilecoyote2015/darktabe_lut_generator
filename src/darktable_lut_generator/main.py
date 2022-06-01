@@ -79,6 +79,12 @@ parser.add_argument(
     help='Provide this flag if the image style is grayscale. Ensures that the resulting'
          ' lookup table contains only grayscale values.'
 )
+parser.add_argument(
+    '--disable_lens_correction',
+    action='store_true',
+    help='Disable auto-applied lens correction module for the RAW image. Only effective without --path_style_raw'
+)
+parser.set_defaults(disable_lens_correction=False)
 parser.set_defaults(is_grayscale=False)
 parser.add_argument(
     '--path_dt_cli',
@@ -152,5 +158,5 @@ main(
     args.make_unreliable_estimates_red,
     args.make_unchanged_red,
     not args.no_interpolation_unreliable,
-
+    not args.disable_lens_correction
 )

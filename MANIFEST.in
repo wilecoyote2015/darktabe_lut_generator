@@ -1,2 +1,3 @@
 include src/darktable_lut_generator/styles/image.dtstyle
 include src/darktable_lut_generator/styles/raw.dtstyle
+include src/darktable_lut_generator/styles/raw_lens_correction.dtstyle
