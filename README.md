@@ -32,6 +32,10 @@ Hence, it is advisable to also shoot the in-camera jpegs in Adobe RGB in order t
 In default configuration, Darktable may apply an exposure module with camera exposure bias correction automatically
 to raw files. The LUTs produced by this module are constructed to resemble the OOC jpeg when used on a raw
 image *without* the exposure bias correction. Also, the *filmic rgb* module should be turned off.
+Also, the lens correction module is activated by default, which can make a huge impact depending on camera/lens
+combination.
+The lens correction module should hence be activated when using the LUT.
+Lens correction can be deactivated during estimation with the according flag.
 
 The command
 ```darktable_lut_generate_pattern [path to output image]```
