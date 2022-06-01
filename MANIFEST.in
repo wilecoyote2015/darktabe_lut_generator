@@ -1,3 +1,2 @@
-include src/darktable_lut_generator/styles/image_input_adobe_rgb.xmp
-include src/darktable_lut_generator/styles/image_input_srgb.xmp
-include src/darktable_lut_generator/styles/raw.xmp
+include src/darktable_lut_generator/styles/image.dtstyle
+include src/darktable_lut_generator/styles/raw.dtstyle

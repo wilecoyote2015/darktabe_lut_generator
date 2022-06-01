@@ -36,6 +36,7 @@ setuptools.setup(
         'opencv-python',
         'tqdm',
         'plotly',
-        'pandas'
+        'pandas',
+        'sqlite3'
     ]
 )

@@ -15,6 +15,9 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
+import shutil
+import time
+import sqlite3
 
 import numpy as np
 import cv2
@@ -122,9 +125,12 @@ def get_aligned_image_pair(path_reference, path_raw, dir_out_info=None):
     mask_result = mask == get_max_value(reference)
     if dir_out_info is not None:
         mix = 0.5 * reference_aligned + 0.5 * raw
-        cv2.imwrite(os.path.join(dir_out_info, f'{os.path.basename(path_reference)}_align_mix.png'), mix)
-        cv2.imwrite(os.path.join(dir_out_info, f'{os.path.basename(path_reference)}_align_raw.png'), raw)
-        cv2.imwrite(os.path.join(dir_out_info, f'{os.path.basename(path_reference)}_align_image.png'), reference)
+        cv2.imwrite(os.path.join(dir_out_info, f'{os.path.basename(path_reference)}_aligned_mix.png'),
+                    cv2.cvtColor(mix.astype(raw.dtype), cv2.COLOR_RGB2BGR))
+        cv2.imwrite(os.path.join(dir_out_info, f'{os.path.basename(path_reference)}_aligned_raw.png'),
+                    cv2.cvtColor(raw, cv2.COLOR_RGB2BGR))
+        cv2.imwrite(os.path.join(dir_out_info, f'{os.path.basename(path_reference)}_aligned_image.png'),
+                    cv2.cvtColor(reference_aligned, cv2.COLOR_RGB2BGR))
 
     return reference_aligned, raw, mask_result
 
@@ -337,6 +343,7 @@ def interpolate_best_missing_lut_entry(lut, indices_sufficient_data, indices_mis
 
     return lut_result, indices_sufficient_data_result, indices_missing_result
 
+
 def interpolate_unreliable_lut_entries(design_matrix, lut):
     indices_lut = make_meshgrid_cube_coordinates(lut.shape[0]).reshape([lut.shape[0] ** 3, 3])
     has_enough_data, has_no_data = calc_is_trustful_estimate(design_matrix, lut.shape[0])
@@ -354,28 +361,6 @@ def interpolate_unreliable_lut_entries(design_matrix, lut):
             indices_sufficient_data,
             indices_missing_data,
         )
-
-    return result
-
-    interpolator = KDTree(indices_sufficient_data)
-
-    result = np.copy(lut)
-
-    for idx_missing in indices_missing_data:
-        distances, indices_nearest = interpolator.query(
-            idx_missing,
-            # distance_upper_bound=1.,
-            k=8,
-        )
-        distance_min = distances[0]
-        indices_nearest = indices_nearest[distances == distance_min]
-        # TODO: properly get real neighbors
-        neighbors = np.asarray([lut[i[0], i[1], i[2]] for i in indices_sufficient_data[indices_nearest]])
-        result[
-            idx_missing[0],
-            idx_missing[1],
-            idx_missing[2]
-        ] = np.mean(neighbors, axis=0)
 
     return result
 
@@ -636,9 +621,9 @@ def make_lut_identity_normed(size):
     return result
 
 
-def main(dir_images, file_out, color_space_image, level=3, n_pixels_sample=100000, is_grayscale=False, resize=0,
+def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=False, resize=0,
          path_dt_exec=None,
-         path_xmp_image=None, path_xmp_raw=None, path_dir_intermediate=None, dir_out_info=None,
+         path_style_image=None, path_style_raw=None, path_dir_intermediate=None, dir_out_info=None,
          make_insufficient_data_red=False, make_unchanged_red=False, interpolate_unreliable=True):
     extensions_raw = ['raw', 'raf', 'dng', 'nef', 'cr3', 'arw', 'cr2', 'cr3', 'orf', 'rw2']
     extensions_image = ['jpg', 'jpeg', 'tiff', 'tif', 'png']
@@ -647,9 +632,6 @@ def main(dir_images, file_out, color_space_image, level=3, n_pixels_sample=10000
         'sRGB': 'image_input_srgb.xmp',
         'AdobeRGB': 'image_input_adobe_rgb.xmp',
     }
-
-    if color_space_image not in names_xmps_image:
-        raise ValueError(f'Image color space {color_space_image} not in allowed: {list(names_xmps_image.keys())}')
 
     pairs_images = []
     for filename_raw in os.listdir(dir_images):
@@ -668,50 +650,71 @@ def main(dir_images, file_out, color_space_image, level=3, n_pixels_sample=10000
             path_dir_temp = path_dir_intermediate
         filepaths_images_converted = []
 
+        path_dir_conf_temp = os.path.join(path_dir_temp, 'conf')
+        os.mkdir(path_dir_conf_temp)
+        path_styles_temp = os.path.join(path_dir_conf_temp, 'styles')
+        os.mkdir(path_styles_temp)
+        print(path_dir_conf_temp)
+
+        with path('darktable_lut_generator.styles', 'image.dtstyle') as path_style_image_default:
+            path_style_image = path_style_image if path_style_image is not None else path_style_image_default
+            shutil.copyfile(path_style_image, os.path.join(path_styles_temp, 'image.dtstyle'))
+        with path('darktable_lut_generator.styles', 'raw.dtstyle') as path_style_raw_default:
+            path_style_raw = path_style_raw if path_style_raw is not None else path_style_raw_default
+            shutil.copyfile(path_style_raw, os.path.join(path_styles_temp, 'raw.dtstyle'))
+
+        args_common = [
+            '--width',
+            str(resize),
+            '--height',
+            str(resize),
+            # '--icc-type',
+            # 'LIN_REC2020',
+            # '--icc-intent',
+            # 'ABSOLUTE_COLORIMETRIC',
+            '--style-overwrite',
+            '--core',
+            '--configdir',
+            path_dir_conf_temp,
+            '--library',
+            ':memory:'
+        ]
+
         for path_image, path_raw in pairs_images:
             path_out_image = os.path.join(path_dir_temp, os.path.basename(path_image) + '.png')
             path_out_raw = os.path.join(path_dir_temp, os.path.basename(path_raw) + '.png')
             print(f'converting image {os.path.basename(path_image)}')
 
-            with tempfile.TemporaryDirectory() as path_dir_conf_temp:
-                args_common = [
-                    '--width',
-                    str(resize),
-                    '--height',
-                    str(resize),
-                    # '--icc-type',
-                    # 'LIN_REC2020',
-                    # '--icc-intent',
-                    # 'ABSOLUTE_COLORIMETRIC',
-                    '--style-overwrite',
-                    '--core',
-                    '--configdir',
-                    path_dir_conf_temp,
-                    '--library',
-                    ':memory:'
-                ]
-                with path('darktable_lut_generator.styles', names_xmps_image[color_space_image]) as path_xmp:
-                    subprocess.call(
-                        [
-                            'darktable-cli' if path_dt_exec is None else path_dt_exec,
-                            path_image,
-                            str(path_xmp.resolve()) if path_xmp_image is None else path_xmp_image,
-                            path_out_image,
-                            *args_common
-                        ]
-                    )
-                print(f'converting raw {os.path.basename(path_raw)}')
+            args = [
+                'darktable-cli' if path_dt_exec is None else path_dt_exec,
+                path_image,
+                path_out_image,
+                '--style',
+                'image',
+                *args_common,
+                "--luacmd",
+                f"local dt = require \"darktable\"; dt.styles.import(\"{path_style_image}\")"
+            ]
+            print(' '.join(args))
+            subprocess.call(
+                args
+            )
+            print(f'converting raw {os.path.basename(path_raw)}')
 
-                with path('darktable_lut_generator.styles', 'raw.xmp') as path_xmp:
-                    subprocess.call(
-                        [
-                            'darktable-cli' if path_dt_exec is None else path_dt_exec,
-                            path_raw,
-                            str(path_xmp.resolve()) if path_xmp_raw is None else path_xmp_raw,
-                            path_out_raw,
-                            *args_common
-                        ]
-                    )
+            args = [
+                'darktable-cli' if path_dt_exec is None else path_dt_exec,
+                path_raw,
+                path_out_raw,
+                '--style',
+                'raw',
+                *args_common,
+                "--luacmd",
+                f"local dt = require \"darktable\"; dt.styles.import(\"{path_style_raw}\")"
+            ]
+            print(' '.join(args))
+            subprocess.call(
+                args
+            )
 
             filepaths_images_converted.append((path_out_image, path_out_raw))
 
@@ -720,9 +723,9 @@ def main(dir_images, file_out, color_space_image, level=3, n_pixels_sample=10000
         result = estimate_lut(filepaths_images_converted, level ** 2, n_pixels_sample, is_grayscale, dir_out_info,
                               make_insufficient_data_red, make_unchanged_red, interpolate_unreliable)
 
-        write_cube(result, file_out)
+    write_cube(result, file_out)
 
-        return result
+    return result
 
 
 def write_cube(lut: np.ndarray, path_output):
@@ -738,6 +741,7 @@ def write_cube(lut: np.ndarray, path_output):
         for idx in range(lut_flattened.shape[0]):
             f.write(
                 f'{s.format(lut_flattened[idx][0])} {s.format(lut_flattened[idx][1])} {s.format(lut_flattened[idx][2])}\n')
+
 
 def write_hald(lut: np.ndarray, path_output, bit_depth=8):
     raise NotImplementedError('Something with target color space is wrong.')

@@ -26,7 +26,7 @@ parser = argparse.ArgumentParser(
           'as input. \n'
           'The images should represent a wide variety of colors; ideally, the whole Adobe RGB color space is covered.\n'
           'The resulting LUT is intended for application in Adobe RGB color space. Hence, it is advisable to shoot the images in'
-          'Adobe RGB. However, it is important to set the --color_space_image argument accordingly.\n'
+          'Adobe RGB.'
           '\n'
           'Estimation is performed by estimating the differences to an identity LUT '
           'using linear regression with LASSO regularization, assuming trilinear interpolation '
@@ -49,12 +49,6 @@ parser.add_argument(
     'file_lut_output',
     type=str,
     help='Desired filepath to store output 3D .cube LUT (with extension).'
-)
-parser.add_argument(
-    '--color_space_image',
-    type=str,
-    default='sRGB',
-    help='Color space of the (OOC) image. sRGB or AdobeRGB.'
 )
 parser.add_argument(
     '--n_samples',
@@ -93,10 +87,10 @@ parser.add_argument(
     help='Path to the darktable-cli executable if it is not in PATH.'
 )
 parser.add_argument(
-    '--path_xmp_raw',
+    '--path_style_raw',
     type=str,
     default=None,
-    help='Path to an optional xmp file for processing the raw images of the input image pairs. '
+    help='Path to an optional .dtstyle file for processing the raw images of the input image pairs. '
          'Use this, for instance, to use a different color space or a different exposure so that the resulting LUT '
          'will yield the correct result on a raw with the corresponding modules applied. '
          'A practical example might be to shoot the sample images in a controlled environment and apply the color'
@@ -104,10 +98,10 @@ parser.add_argument(
          'transformation.'
 )
 parser.add_argument(
-    '--path_xmp_image',
+    '--path_style_image',
     type=str,
     default=None,
-    help='Path to an optional xmp file for processing the out of camera / processed images of the input image pairs. '
+    help='Path to an optional .dtstyle file for processing the out of camera / processed images of the input image pairs. '
          'This can be used to use different color spaces, but no further changes should be made to the image.'
 )
 parser.add_argument(
@@ -146,14 +140,13 @@ args = parser.parse_args()
 main(
     args.dir_images,
     args.file_lut_output,
-    args.color_space_image,
     args.level,
     args.n_samples if args.n_samples > 0 else None,
     args.is_grayscale,
     args.resize,
     args.path_dt_cli,
-    args.path_xmp_image,
-    args.path_xmp_raw,
+    args.path_style_image,
+    args.path_style_raw,
     args.path_dir_intermediate,
     args.path_dir_out_info,
     args.make_unreliable_estimates_red,
