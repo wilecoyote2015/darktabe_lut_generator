@@ -29,7 +29,6 @@ A directory with image pairs of one RAW image and the corresponding OOC image (e
 The images should represent a wide variety of colors; ideally, the whole Adobe RGB color space is covered.
 The resulting LUT is intended for application in Adobe RGB color space.
 Hence, it is advisable to also shoot the in-camera jpegs in Adobe RGB in order to cover the whole available gamut.
-But the `--color_space_image` argument must then be set accordingly.
 In default configuration, Darktable may apply an exposure module with camera exposure bias correction automatically
 to raw files. The LUTs produced by this module are constructed to resemble the OOC jpeg when used on a raw
 image *without* the exposure bias correction. Also, the *filmic rgb* module should be turned off.
