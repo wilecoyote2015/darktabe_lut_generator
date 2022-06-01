@@ -16,6 +16,7 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 import shutil
+import time
 
 import numpy as np
 import cv2
@@ -626,11 +627,6 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
     extensions_raw = ['raw', 'raf', 'dng', 'nef', 'cr3', 'arw', 'cr2', 'cr3', 'orf', 'rw2']
     extensions_image = ['jpg', 'jpeg', 'tiff', 'tif', 'png']
 
-    names_xmps_image = {
-        'sRGB': 'image_input_srgb.xmp',
-        'AdobeRGB': 'image_input_adobe_rgb.xmp',
-    }
-
     pairs_images = []
     for filename_raw in os.listdir(dir_images):
         path_raw = os.path.join(dir_images, filename_raw)
@@ -647,6 +643,9 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
         if path_dir_intermediate is not None:
             path_dir_temp = path_dir_intermediate
         filepaths_images_converted = []
+
+        path_dir_images_temp = os.path.join(path_dir_temp, 'images')
+        os.mkdir(path_dir_images_temp)
 
         path_dir_conf_temp = os.path.join(path_dir_temp, 'conf')
         os.mkdir(path_dir_conf_temp)
@@ -683,9 +682,17 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
             path_out_raw = os.path.join(path_dir_temp, os.path.basename(path_raw) + '.png')
             print(f'converting image {os.path.basename(path_image)}')
 
+            # Copy the images so that no accompanying .xmp files are present
+            #   because for some reason, color shifts etc. occur when developing the raw from the local files
+            #   even with style-overwrite flag.
+            path_in_image = os.path.join(path_dir_images_temp, os.path.basename(path_image))
+            path_in_raw = os.path.join(path_dir_images_temp, os.path.basename(path_raw))
+            shutil.copyfile(path_image, path_in_image)
+            shutil.copyfile(path_raw, path_in_raw)
+
             args = [
                 'darktable-cli' if path_dt_exec is None else path_dt_exec,
-                path_image,
+                path_in_image,
                 path_out_image,
                 '--style',
                 'image',
@@ -695,13 +702,14 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
             ]
             print(' '.join(args))
             subprocess.call(
-                args
+                args,
+                timeout=1e10
             )
             print(f'converting raw {os.path.basename(path_raw)}')
 
             args = [
                 'darktable-cli' if path_dt_exec is None else path_dt_exec,
-                path_raw,
+                path_in_raw,
                 path_out_raw,
                 '--style',
                 'raw',
@@ -711,7 +719,8 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
             ]
             print(' '.join(args))
             subprocess.call(
-                args
+                args,
+                timeout=1e10
             )
 
             filepaths_images_converted.append((path_out_image, path_out_raw))
