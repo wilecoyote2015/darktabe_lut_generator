@@ -4,4 +4,3 @@ opencv-python
 tqdm
 pandas
 plotly
-sqlite3
