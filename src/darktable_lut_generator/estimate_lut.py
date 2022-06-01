@@ -16,13 +16,11 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 import shutil
-import time
-import sqlite3
 
 import numpy as np
 import cv2
 import scipy.optimize
-from sklearn.linear_model import Lasso, LinearRegression
+from sklearn.linear_model import Lasso
 import logging
 from tqdm import tqdm
 import tempfile
