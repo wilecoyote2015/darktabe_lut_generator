@@ -34,6 +34,9 @@ from scipy.optimize import lsq_linear
 from scipy import ndimage
 
 
+# FIXME: AAAH! Regarding blue problems: look at the aligned pattern image. for some, the dark blues are black. why?
+#   Buffer overflow while conversion?
+
 # TODO: some boundary colors are off although enough samples are present.
 #   would be nice to optimize with proper spatial regularization w.r.t. the lut colors
 #   (maybe grmf prior)
@@ -630,7 +633,7 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
          path_dt_exec=None,
          path_style_image=None, path_style_raw=None, path_dir_intermediate=None, dir_out_info=None,
          make_insufficient_data_red=False, make_unchanged_red=False, interpolate_unreliable=True,
-         use_lens_correction=True):
+         use_lens_correction=True, legacy_color=False):
     extensions_raw = ['raw', 'raf', 'dng', 'nef', 'cr3', 'arw', 'cr2', 'cr3', 'orf', 'rw2']
     extensions_image = ['jpg', 'jpeg', 'tiff', 'tif', 'png']
 
@@ -686,7 +689,9 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
             '--configdir',
             path_dir_conf_temp,
             '--library',
-            ':memory:'
+            ':memory:',
+            '--conf',
+            f'plugins/darkroom/chromatic-adaptation={"legacy" if legacy_color else "modern"}'
         ]
 
         for path_image, path_raw in pairs_images:
