@@ -720,7 +720,7 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
             # 'LIN_REC2020',
             # '--icc-intent',
             # 'ABSOLUTE_COLORIMETRIC',
-            '--style-overwrite',
+            # '--style-overwrite',  # TODO: activating leads to the color calibration module not rendered on export despite it being active in darkroom.
             '--core',
             '--configdir',
             path_dir_conf_temp,
