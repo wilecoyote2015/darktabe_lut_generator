@@ -55,12 +55,12 @@ def align_images_ecc(im1, im2):
     im1_gray = cv2.cvtColor(im1, cv2.COLOR_BGR2GRAY)
     im2_gray = cv2.cvtColor(im2, cv2.COLOR_BGR2GRAY)
 
-    if im1_gray.dtype == np.uint16:
-        im1_gray = (im1_gray / 2 ** 8).astype(np.uint8)
-        im2_gray = (im2_gray / 2 ** 8).astype(np.uint8)
+    # min max scaling
+    im1_gray = ((im1_gray - np.min(im1_gray)) / (np.max(im1_gray) - np.min(im1_gray))).astype(np.float32)
+    im2_gray = ((im2_gray - np.min(im2_gray)) / (np.max(im2_gray) - np.min(im2_gray))).astype(np.float32)
 
     # Define the motion model
-    warp_mode = cv2.MOTION_HOMOGRAPHY
+    warp_mode = cv2.MOTION_AFFINE
 
     # Define 2x3 or 3x3 matrices and initialize the matrix to identity
     if warp_mode == cv2.MOTION_HOMOGRAPHY:
@@ -108,7 +108,7 @@ def get_max_value(image: np.ndarray):
         raise NotImplementedError
 
 
-def get_aligned_image_pair(path_reference, path_raw, dir_out_info=None):
+def get_aligned_image_pair(path_reference, path_raw, do_alignment, dir_out_info=None):
     reference = cv2.cvtColor(cv2.imread(path_reference, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
     raw = cv2.cvtColor(cv2.imread(path_raw, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
 
@@ -117,28 +117,60 @@ def get_aligned_image_pair(path_reference, path_raw, dir_out_info=None):
     if reference.dtype not in [np.uint8, np.uint16]:
         raise ValueError(f'Unsupported image dtype: {reference.dtype}')
 
-    # align the images
-    print(f'aligning image {path_reference}')
-    reference_aligned, mask = align_images_ecc(
-        reference,
-        raw
-    )
+    if do_alignment:
+        # align the images
+        print(f'aligning image {path_reference}')
+        reference_aligned, mask = align_images_ecc(
+            reference,
+            raw
+        )
+        raw_aligned = raw
+    else:
+        diff_size = np.asarray(raw.shape[:2]) - np.asarray(reference.shape[:2])
+        crop_one_side = diff_size / 2
+        crops = np.stack([np.floor(crop_one_side), np.ceil(crop_one_side)], axis=1).astype(int)
+
+        def crop_dimension(raw, reference, crops, axis):
+            if axis == 1:
+                axes = [1, 0, 2]
+                raw, reference = np.transpose(raw, axes), np.transpose(reference, axes)
+            if crops[0] < 0:
+                reference = reference[-crops[0]:]
+            elif crops[0] > 0:
+                raw = raw[crops[0]:]
+
+            if crops[1] < 0:
+                reference = reference[:crops[1]]
+            elif crops[1] > 0:
+                raw = raw[:-crops[1]]
+
+            if axis == 1:
+                axes = [1, 0, 2]
+                raw, reference = np.transpose(raw, axes), np.transpose(reference, axes)
+
+            return raw, reference
+
+        raw_aligned, reference_aligned = crop_dimension(raw, reference, crops[0], 0)
+        raw_aligned, reference_aligned = crop_dimension(raw_aligned, reference_aligned, crops[1], 1)
+
+        mask = np.full_like(reference_aligned[..., 0], get_max_value(reference_aligned))
+
     print('Finished alignment')
     mask_result = mask == get_max_value(reference)
     if dir_out_info is not None:
-        mix = 0.5 * reference_aligned + 0.5 * raw
+        mix = 0.5 * reference_aligned + 0.5 * raw_aligned
         cv2.imwrite(os.path.join(dir_out_info, f'{os.path.basename(path_reference)}_aligned_mix.png'),
-                    cv2.cvtColor(mix.astype(raw.dtype), cv2.COLOR_RGB2BGR))
+                    cv2.cvtColor(mix.astype(raw_aligned.dtype), cv2.COLOR_RGB2BGR))
         cv2.imwrite(os.path.join(dir_out_info, f'{os.path.basename(path_reference)}_aligned_raw.png'),
-                    cv2.cvtColor(raw, cv2.COLOR_RGB2BGR))
+                    cv2.cvtColor(raw_aligned, cv2.COLOR_RGB2BGR))
         cv2.imwrite(os.path.join(dir_out_info, f'{os.path.basename(path_reference)}_aligned_image.png'),
                     cv2.cvtColor(reference_aligned, cv2.COLOR_RGB2BGR))
 
-    return reference_aligned, raw, mask_result
+    return reference_aligned, raw_aligned, mask_result
 
 
 def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grayscale, dir_out_info,
-                 make_insufficient_data_red, make_unchanged_red, interpolate_unreliable) -> np.ndarray:
+                 make_insufficient_data_red, make_unchanged_red, interpolate_unreliable, do_alignment) -> np.ndarray:
     """
     :param filepaths_images: paths of image pairs: [reference, vanilla raw development]
     :return:
@@ -151,7 +183,8 @@ def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grays
             path_reference,
             path_raw,
             int(n_pixels_sample / len(filepaths_images)) if n_pixels_sample is not None else None,
-            dir_out_info
+            dir_out_info,
+            do_alignment
         )
         pixels_raws.append(pixels_raw)
         pixels_references.append(pixels_reference)
@@ -222,8 +255,8 @@ def sample_indices_pixels(pixels, n_samples, uniform=True, size_batch_uniform=10
     return indices_sampled
 
 
-def get_pixels_sample_image_pair(path_reference, path_raw, n_samples, dir_out_info):
-    reference, raw, mask = get_aligned_image_pair(path_reference, path_raw, dir_out_info)
+def get_pixels_sample_image_pair(path_reference, path_raw, n_samples, dir_out_info, do_alignment):
+    reference, raw, mask = get_aligned_image_pair(path_reference, path_raw, do_alignment, dir_out_info)
     max_value = get_max_value(reference)
 
     pixels_reference = np.reshape(
@@ -633,7 +666,7 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
          path_dt_exec=None,
          path_style_image=None, path_style_raw=None, path_dir_intermediate=None, dir_out_info=None,
          make_insufficient_data_red=False, make_unchanged_red=False, interpolate_unreliable=True,
-         use_lens_correction=True, legacy_color=False):
+         use_lens_correction=True, legacy_color=False, do_alignment=True):
     extensions_raw = ['raw', 'raf', 'dng', 'nef', 'cr3', 'arw', 'cr2', 'cr3', 'orf', 'rw2']
     extensions_image = ['jpg', 'jpeg', 'tiff', 'tif', 'png']
 
@@ -745,7 +778,7 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
         print('Finished converting. Generating LUT.')
         # a halc clut is a cube with level**2 entries on each dimension
         result = estimate_lut(filepaths_images_converted, level ** 2, n_pixels_sample, is_grayscale, dir_out_info,
-                              make_insufficient_data_red, make_unchanged_red, interpolate_unreliable)
+                              make_insufficient_data_red, make_unchanged_red, interpolate_unreliable, do_alignment)
 
     write_cube(result, file_out)
 

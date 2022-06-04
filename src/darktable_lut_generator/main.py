@@ -92,6 +92,22 @@ def main():
     )
     parser.set_defaults(disable_lens_correction=False)
     parser.add_argument(
+        '--disable_image_alignment',
+        action='store_true',
+        help='Often, developed raws and OOC images do not overlap'
+             ' perfectly. One may assume that the developed Raw has the same amount of additional'
+             '  pixels on each side and is otherwise geometrically identical to the OOC image.'
+             'Then, the developed raw can simply be cropped accordingly. '
+             'The assumption does not hold in many real-world cases, though. In particular, in-camera lens correction'
+             ' may distort the image.'
+             ' A simple image alignment procedure is used'
+             ' to align the images and compensate for some distortions by default. '
+             'This flag disables the image alignment and just crops the raw image.'
+             'Use the --path_dir_out_info to inspect'
+             ' the generated images and assess whether alignment is necessary and if it works.'
+    )
+    parser.set_defaults(disable_image_alignment=False)
+    parser.add_argument(
         '--legacy_color',
         action='store_true',
         help='Use legacy color adaption for raw development'
@@ -170,7 +186,8 @@ def main():
         args.make_unchanged_red,
         not args.no_interpolation_unreliable,
         not args.disable_lens_correction,
-        args.legacy_color
+        args.legacy_color,
+        not args.disable_image_alignment
     )
 
 
