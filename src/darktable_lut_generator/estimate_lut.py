@@ -158,12 +158,15 @@ def get_aligned_image_pair(path_reference, path_raw, do_alignment, dir_out_info=
     print('Finished alignment')
     mask_result = mask == get_max_value(reference)
     if dir_out_info is not None:
+        path_dir_info_export = os.path.join(dir_out_info, 'alignment')
+        if not os.path.exists(path_dir_info_export):
+            os.makedirs(path_dir_info_export)
         mix = 0.5 * reference_aligned + 0.5 * raw_aligned
-        cv2.imwrite(os.path.join(dir_out_info, f'{os.path.basename(path_reference)}_aligned_mix.png'),
+        cv2.imwrite(os.path.join(path_dir_info_export, f'{os.path.basename(path_reference)}_aligned_mix.png'),
                     cv2.cvtColor(mix.astype(raw_aligned.dtype), cv2.COLOR_RGB2BGR))
-        cv2.imwrite(os.path.join(dir_out_info, f'{os.path.basename(path_reference)}_aligned_raw.png'),
+        cv2.imwrite(os.path.join(path_dir_info_export, f'{os.path.basename(path_reference)}_aligned_raw.png'),
                     cv2.cvtColor(raw_aligned, cv2.COLOR_RGB2BGR))
-        cv2.imwrite(os.path.join(dir_out_info, f'{os.path.basename(path_reference)}_aligned_image.png'),
+        cv2.imwrite(os.path.join(path_dir_info_export, f'{os.path.basename(path_reference)}_aligned_image.png'),
                     cv2.cvtColor(reference_aligned, cv2.COLOR_RGB2BGR))
 
     return reference_aligned, raw_aligned, mask_result
@@ -692,7 +695,7 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
 
         path_dir_conf_temp = os.path.join(path_dir_temp, 'conf')
         os.mkdir(path_dir_conf_temp)
-        path_styles_temp = os.path.join(path_dir_conf_temp, 'styles')
+        path_styles_temp = os.path.join(path_dir_temp, 'styles')
         os.mkdir(path_styles_temp)
         print(path_dir_conf_temp)
 
@@ -774,6 +777,15 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
             )
 
             filepaths_images_converted.append((path_out_image, path_out_raw))
+
+        if dir_out_info:
+            path_dir_info_export = os.path.join(dir_out_info, 'export_darktable')
+            if not os.path.exists(path_dir_info_export):
+                os.makedirs(path_dir_info_export)
+
+            for path_image, path_raw in filepaths_images_converted:
+                shutil.copyfile(path_image, os.path.join(path_dir_info_export, os.path.basename(path_image)))
+                shutil.copyfile(path_raw, os.path.join(path_dir_info_export, os.path.basename(path_raw)))
 
         print('Finished converting. Generating LUT.')
         # a halc clut is a cube with level**2 entries on each dimension
