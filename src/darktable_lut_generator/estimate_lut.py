@@ -741,14 +741,14 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
         print(path_dir_conf_temp)
 
         with path('darktable_lut_generator.styles', 'image.dtstyle') as path_style_image_default:
-            path_style_image = path_style_image if path_style_image is not None else path_style_image_default
+            path_style_image = path_style_image_user if path_style_image_user is not None else path_style_image_default
             path_style_image_temp = os.path.join(path_styles_temp, 'image.dtstyle')
             shutil.copyfile(path_style_image, path_style_image_temp)
         with path(
                 'darktable_lut_generator.styles',
                 ('raw_lens_correction.dtstyle' if use_lens_correction else 'raw.dtstyle')
         ) as path_style_raw_default:
-            path_style_raw = path_style_raw if path_style_raw is not None else path_style_raw_default
+            path_style_raw = path_style_raw_user if path_style_raw_user is not None else path_style_raw_default
             path_style_raw_temp = os.path.join(path_styles_temp, 'raw.dtstyle')
             shutil.copyfile(path_style_raw, path_style_raw_temp)
 
@@ -757,8 +757,8 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
             str(resize),
             '--height',
             str(resize),
-            # '--icc-type',
-            # 'LIN_REC2020',
+            '--icc-type',
+            'ADOBERGB',
             # '--icc-intent',
             # 'ABSOLUTE_COLORIMETRIC',
             # '--style-overwrite',  # TODO: activating leads to the color calibration module not rendered on export despite it being active in darkroom.
@@ -768,7 +768,13 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
             '--library',
             ':memory:',
             '--conf',
-            f'plugins/darkroom/chromatic-adaptation={"legacy" if legacy_color else "modern"}'
+            f'plugins/darkroom/chromatic-adaptation={"legacy" if legacy_color else "modern"}',
+            '--conf',
+            'plugins/darkroom/sharpen/auto_apply=FALSE',
+            '--conf',
+            'plugins/darkroom/workflow=none',
+            '--conf',
+            'opencl=FALSE'
         ]
 
         for path_image, path_raw in pairs_images:
@@ -788,6 +794,11 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
                 'darktable-cli' if path_dt_exec is None else path_dt_exec,
                 path_in_image,
                 path_out_image,
+                *args_common,
+            ] if path_style_image_user is None else [
+                'darktable-cli' if path_dt_exec is None else path_dt_exec,
+                path_in_image,
+                path_out_image,
                 '--style',
                 get_name_style(path_style_image_temp),
                 *args_common,
@@ -802,6 +813,15 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
             print(f'converting raw {os.path.basename(path_raw)}')
 
             args = [
+                'darktable-cli' if path_dt_exec is None else path_dt_exec,
+                path_in_raw,
+                path_out_raw,
+                # '--style',
+                # get_name_style(path_style_raw_temp),
+                *args_common,
+                # "--luacmd",
+                # f"local dt = require \"darktable\"; dt.styles.import(\"{path_style_raw_temp}\")"
+            ] if path_style_raw_user is None else [
                 'darktable-cli' if path_dt_exec is None else path_dt_exec,
                 path_in_raw,
                 path_out_raw,
