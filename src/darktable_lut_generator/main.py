@@ -84,6 +84,12 @@ def main():
              ' lookup table contains only grayscale values.'
     )
     parser.set_defaults(is_grayscale=False)
+    parser.add_argument(
+        '--sample_uniform',
+        action='store_true',
+        help='Try to sample the pixels uniformly over the color space.'
+    )
+    parser.set_defaults(sample_uniform=False)
 
     parser.add_argument(
         '--disable_lens_correction',
@@ -167,6 +173,20 @@ def main():
         help='By default, estimates for colors with unreliably few samples are interpolated. Disable this.'
     )
     parser.set_defaults(no_interpolation_unreliable=False)
+    parser.add_argument(
+        '--interpolate_only_missing_data',
+        action='store_true',
+        help='By default, estimates for colors with unreliably few samples are interpolated. '
+             'If this flag is active and --no_interpolation_unreliable is NOT set, only colors with '
+             'no samples are considered unreliable. '
+             'TODO: Do some statistical inference to determine reliability of estimated parameters for more '
+             'sophisticated decision which colors to interpolate. But note that constrained optimization is used, '
+             'so that the statistical assumptions for OLS standard errors do not apply. In the one hand, '
+             'providing a statistically attractive measure for reliability may not be as trivial as it seems '
+             'intuitively. In the other hand, a simple approach might work well enough in practice. '
+             'If you like to contribute, you are welcome!'
+    )
+    parser.set_defaults(interpolate_only_missing_data=False)
 
     args = parser.parse_args()
 
@@ -187,7 +207,9 @@ def main():
         not args.no_interpolation_unreliable,
         not args.disable_lens_correction,
         args.legacy_color,
-        not args.disable_image_alignment
+        not args.disable_image_alignment,
+        args.sample_uniform,
+        args.interpolate_only_missing_data
     )
 
 

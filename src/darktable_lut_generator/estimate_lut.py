@@ -34,7 +34,16 @@ from scipy.optimize import lsq_linear
 from scipy import ndimage
 
 
-# FIXME: AAAH! Regarding blue problems: look at the aligned pattern image. for some, the dark blues are black. why?
+# FIXME: Something is wron with the export from darktable via command line:
+#   for peter's dataset, consider the pattern images:
+#   the developed raw outputted via the command line by this script differs
+#   significantly from the output of darktable with my configuration if the same style is applied.
+#   and yes, I took care that the history stack was the same before applying the style
+#   and history handling was set to append in both cases.
+#   but this is not really reproducible. sometimes, the images are fine.
+#   I have no idea what's going on.
+
+# FIXME: Regarding blue problems: look at the aligned pattern image. for some, the dark blues are black. why?
 #   Buffer overflow while conversion?
 
 # TODO: some boundary colors are off although enough samples are present.
@@ -198,7 +207,9 @@ def get_aligned_image_pair(path_reference, path_raw, do_alignment, dir_out_info=
 
 
 def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grayscale, dir_out_info,
-                 make_insufficient_data_red, make_unchanged_red, interpolate_unreliable, do_alignment) -> np.ndarray:
+                 make_insufficient_data_red, make_unchanged_red, interpolate_unreliable, do_alignment,
+                 sample_uniform,
+                 interpolate_only_missing_data) -> np.ndarray:
     """
     :param filepaths_images: paths of image pairs: [reference, vanilla raw development]
     :return:
@@ -212,7 +223,8 @@ def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grays
             path_raw,
             int(n_pixels_sample / len(filepaths_images)) if n_pixels_sample is not None else None,
             dir_out_info,
-            do_alignment
+            do_alignment,
+            sample_uniform
         )
         pixels_raws.append(pixels_raw)
         pixels_references.append(pixels_reference)
@@ -221,7 +233,8 @@ def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grays
     pixels_references = np.concatenate(pixels_references, axis=0)
 
     lut_result_normed = perform_estimation(pixels_references, pixels_raws, size, is_grayscale, dir_out_info,
-                                           make_insufficient_data_red, make_unchanged_red, interpolate_unreliable)
+                                           make_insufficient_data_red, make_unchanged_red, interpolate_unreliable,
+                                           interpolate_only_missing_data)
 
     return lut_result_normed
 
@@ -239,17 +252,18 @@ def sample_uniform_from_histogram(histogram, edges, pixels, indices_pixels, n_sa
     return indices_sampled
 
 
-def sample_indices_pixels(pixels, n_samples, uniform=True, size_batch_uniform=100000):
+def sample_indices_pixels(pixels, n_samples, uniform=False, size_batch_uniform=100000):
     if n_samples is None:
         return np.arange(0, pixels.shape[0])
     if uniform:
         # Generate sample that is approx. uniformly distributed w.r.t. pixel color values
         #   to enhance generalization of fitted lut coefficients and hence reduce needed sample size.
         #   Use histogram to estimate PDF and weight with the inverse
+        n_bins = 10
         bins = np.stack([
-            np.linspace(np.min(pixels[..., 0]), np.max(pixels[..., 0]) + 1e-10, 10),
-            np.linspace(np.min(pixels[..., 1]), np.max(pixels[..., 1]) + 1e-10, 10),
-            np.linspace(np.min(pixels[..., 2]), np.max(pixels[..., 2]) + 1e-10, 10),
+            np.linspace(np.min(pixels[..., 0]), np.max(pixels[..., 0]) + 1e-10, n_bins),
+            np.linspace(np.min(pixels[..., 1]), np.max(pixels[..., 1]) + 1e-10, n_bins),
+            np.linspace(np.min(pixels[..., 2]), np.max(pixels[..., 2]) + 1e-10, n_bins),
         ],
             axis=0
         )
@@ -283,7 +297,7 @@ def sample_indices_pixels(pixels, n_samples, uniform=True, size_batch_uniform=10
     return indices_sampled
 
 
-def get_pixels_sample_image_pair(path_reference, path_raw, n_samples, dir_out_info, do_alignment):
+def get_pixels_sample_image_pair(path_reference, path_raw, n_samples, dir_out_info, do_alignment, sample_uniform):
     reference, raw, mask = get_aligned_image_pair(path_reference, path_raw, do_alignment, dir_out_info)
     max_value = get_max_value(reference)
 
@@ -302,7 +316,7 @@ def get_pixels_sample_image_pair(path_reference, path_raw, n_samples, dir_out_in
         )
     )[np.reshape(mask, mask.shape[0] * mask.shape[1])]
 
-    indices_sample = sample_indices_pixels(pixels_raw, n_samples)
+    indices_sample = sample_indices_pixels(pixels_raw, n_samples, uniform=sample_uniform)
     result_raw = pixels_raw[indices_sample].astype(np.float64) / max_value
     result_reference = pixels_reference[indices_sample].astype(np.float64) / max_value
 
@@ -407,11 +421,11 @@ def interpolate_best_missing_lut_entry(lut, indices_sufficient_data, indices_mis
     return lut_result, indices_sufficient_data_result, indices_missing_result
 
 
-def interpolate_unreliable_lut_entries(design_matrix, lut):
+def interpolate_unreliable_lut_entries(design_matrix, lut, only_without_data):
     indices_lut = make_meshgrid_cube_coordinates(lut.shape[0]).reshape([lut.shape[0] ** 3, 3])
     has_enough_data, has_no_data = calc_is_trustful_estimate(design_matrix, lut.shape[0])
 
-    indices_invalid = np.logical_not(has_enough_data)
+    indices_invalid = has_no_data if only_without_data else np.logical_not(has_enough_data)
     # indices_invalid = has_no_data
 
     indices_missing_data = np.argwhere(indices_invalid.reshape(lut.shape[:3]))
@@ -586,7 +600,8 @@ def fit_channel_lasso(design_matrix, differences_references_raw_channel, idx_cha
 
 def perform_estimation(pixels_references, pixels_raws, size, is_grayscale, dir_out_info=None,
                        make_insufficient_data_red=False,
-                       make_unchanged_red=False, interpolate_unreliable=True):
+                       make_unchanged_red=False, interpolate_unreliable=True,
+                       interpolate_only_missing_data=False):
     design_matrix = make_design_matrix(pixels_references, pixels_raws, size)
 
     print('fitting lookup table coefficients')
@@ -634,7 +649,7 @@ def perform_estimation(pixels_references, pixels_raws, size, is_grayscale, dir_o
             result[..., idx_channel] += lut_difference_channel
 
     if interpolate_unreliable:
-        result = interpolate_unreliable_lut_entries(design_matrix, result)
+        result = interpolate_unreliable_lut_entries(design_matrix, result, interpolate_only_missing_data)
 
     result = np.clip(result, a_min=0., a_max=1.)
 
@@ -692,9 +707,10 @@ def get_name_style(path_style):
 
 def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=False, resize=0,
          path_dt_exec=None,
-         path_style_image=None, path_style_raw=None, path_dir_intermediate=None, dir_out_info=None,
+         path_style_image_user=None, path_style_raw_user=None, path_dir_intermediate=None, dir_out_info=None,
          make_insufficient_data_red=False, make_unchanged_red=False, interpolate_unreliable=True,
-         use_lens_correction=True, legacy_color=False, do_alignment=True):
+         use_lens_correction=True, legacy_color=False, do_alignment=True,
+         sample_uniform=False, interpolate_only_missing_data=False):
     extensions_raw = ['raw', 'raf', 'dng', 'nef', 'cr3', 'arw', 'cr2', 'cr3', 'orf', 'rw2']
     extensions_image = ['jpg', 'jpeg', 'tiff', 'tif', 'png']
 
@@ -815,7 +831,8 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
         print('Finished converting. Generating LUT.')
         # a halc clut is a cube with level**2 entries on each dimension
         result = estimate_lut(filepaths_images_converted, level ** 2, n_pixels_sample, is_grayscale, dir_out_info,
-                              make_insufficient_data_red, make_unchanged_red, interpolate_unreliable, do_alignment)
+                              make_insufficient_data_red, make_unchanged_red, interpolate_unreliable, do_alignment,
+                              sample_uniform, interpolate_only_missing_data)
 
     write_cube(result, file_out)
 
