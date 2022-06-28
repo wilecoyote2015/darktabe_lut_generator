@@ -97,14 +97,16 @@ def main():
         help='Use auto-applied lens correction module for the RAW image. Only effective without --path_style_raw.'
              ' Note that lens correction is a bit tricky as it can change the exposure, so that the resulting LUT may only yield good results'
              'for images with the same lens and lens correction applied. It should be preferred to not use lens correctio and'
-             ' also disable lens correction in camera. This setting is mainly intended for use with cameras that do not allow'
+             ' also disable lens correction in camera. Then, alignment can usually also be disabled with --disable_image_alignment.'
+             ' This setting is mainly intended for use with cameras that do not allow'
              ' disabling in-camera lens correction for the OOC JPEGs.'
     )
     parser.set_defaults(use_lens_correction=False)
     parser.add_argument(
         '--disable_image_alignment',
         action='store_true',
-        help='Often, developed raws and OOC images do not overlap'
+        help='This flag disables the image alignment and just crops the raw image.'
+             'Often, developed raws and OOC images do not overlap'
              ' perfectly. One may assume that the developed Raw has the same amount of additional'
              '  pixels on each side and is otherwise geometrically identical to the OOC image.'
              'Then, the developed raw can simply be cropped accordingly. '
@@ -112,9 +114,13 @@ def main():
              ' may distort the image.'
              ' A simple image alignment procedure is used'
              ' to align the images and compensate for some distortions by default. '
-             'This flag disables the image alignment and just crops the raw image.'
+             'Alignment is tricky, especially as OOC and RAW images usually exhibit different gradiation. '
+             'Pixel-Level alignment precision is necessary for good LUT estimation results and this is '
+             'not necessarily provided with alignment. Hence, it is important to check the alignment results.'
              'Use the --path_dir_out_info to inspect'
              ' the generated images and assess whether alignment is necessary and if it works.'
+             'Generally, the best results are achieved by disabling in camera lens correction and hence . Then,'
+             ' image alignment can also be disabled in most cases.'
     )
     parser.set_defaults(disable_image_alignment=False)
     parser.add_argument(
