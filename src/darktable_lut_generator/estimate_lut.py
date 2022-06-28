@@ -236,6 +236,24 @@ def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grays
                                            make_interpolated_red, make_unchanged_red, interpolate_unreliable,
                                            interpolate_only_missing_data)
 
+    if dir_out_info is not None:
+        print('Exporting transformed images')
+        path_dir_info_image = os.path.join(dir_out_info, 'reference_and_transformed')
+        if not os.path.exists(path_dir_info_image):
+            os.mkdir(path_dir_info_image)
+        for path_reference, path_raw in tqdm(filepaths_images):
+            raw = cv2.cvtColor(cv2.imread(path_raw, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
+            shutil.copyfile(
+                path_reference,
+                os.path.join(path_dir_info_image, os.path.basename(path_reference))
+            )
+
+            raw_transformed = apply_lut(raw, lut_result_normed)
+            cv2.imwrite(
+                os.path.join(path_dir_info_image, os.path.basename(path_raw)),
+                cv2.cvtColor(raw_transformed, cv2.COLOR_RGB2BGR)
+            )
+
     return lut_result_normed
 
 
@@ -321,6 +339,59 @@ def get_pixels_sample_image_pair(path_reference, path_raw, n_samples, dir_out_in
     result_reference = pixels_reference[indices_sample].astype(np.float64) / max_value
 
     return result_reference, result_raw, max_value
+
+
+def make_weights_distances_lut_entries_channels(pixels, size):
+    """ Get trilinear interpolation weights for LUT entries for each piel coordinate of the lut for one color axis.
+    """
+    coordinates = np.linspace(0, 1, size)
+    step_size = 1. / (size - 1)
+
+    # differences_channels is [... (pixels), channel, lut coordinate]
+    differences_channels = (
+            pixels[..., np.newaxis]
+            - np.expand_dims(np.stack([coordinates] * 3, axis=0), [i for i in range(pixels.ndim - 2)])
+    )
+    differences_channels_relative_grid_steps = differences_channels / step_size
+    weights_distances_channels = np.maximum(1. - np.abs(differences_channels_relative_grid_steps), 0.)
+
+    return weights_distances_channels
+
+
+def apply_lut(image, lut):
+    size = int(np.cbrt(lut.size / 3))
+
+    max_value = get_max_value(image)
+    image_normed = image.astype(np.float64) / max_value
+    weights_distances_channels = make_weights_distances_lut_entries_channels(image_normed, size)
+
+    result = np.zeros_like(image_normed)
+    # TODO: speed up while still balancing memory usage
+    for idx_y in range(image_normed.shape[0]):
+        for idx_x in range(image_normed.shape[1]):
+            result[idx_y, idx_x] = apply_lut_pixel(
+                lut,
+                weights_distances_channels[idx_y, idx_x]
+            )
+
+    result *= max_value
+
+    return result.astype(image.dtype)
+
+
+def apply_lut_pixel(lut, weights_distances_channels_pixel):
+    result = np.zeros([3], np.float)
+
+    weights_entries_lut = (
+            weights_distances_channels_pixel[0, ..., np.newaxis, np.newaxis]
+            * weights_distances_channels_pixel[1, np.newaxis, ..., np.newaxis]
+            * weights_distances_channels_pixel[2, np.newaxis, np.newaxis, ...]
+    )
+
+    for idx_channel in range(3):
+        result[idx_channel] = np.sum(weights_entries_lut * lut[..., idx_channel])
+
+    return result
 
 
 def make_design_matrix(pixels_references, pixels_raws, size):
