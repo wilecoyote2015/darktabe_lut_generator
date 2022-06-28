@@ -162,19 +162,19 @@ def main():
     parser.add_argument(
         '--make_unreliable_estimates_red',
         action='store_true',
-        help='In the resulting LUT, make estimates of colors with unreliably few datapoints red.'
+        help='In the resulting LUT, make estimates of colors with unreliably few datapoints red. Useful for debugging and identifying sparsely sampled colors.'
     )
     parser.set_defaults(make_unreliable_estimates_red=False)
     parser.add_argument(
         '--make_unchanged_red',
         action='store_true',
-        help='In the resulting LUT, make colors that are estimated as unchanged w.r.t. an identity LUT red.'
+        help='In the resulting LUT, make colors that are estimated as unchanged w.r.t. an identity LUT red. Useful for debugging and identifying sparsely sampled colors.'
     )
     parser.set_defaults(make_unchanged_red=False)
     parser.add_argument(
         '--no_interpolation_unreliable',
         action='store_true',
-        help='By default, estimates for colors with unreliably few samples are interpolated. Disable this.'
+        help='By default, estimates for colors with unreliably few samples are interpolated. This flag disables the interpolation, which may lead to wrong colors that are not covered well by the sample images..'
     )
     parser.set_defaults(no_interpolation_unreliable=False)
     parser.add_argument(
