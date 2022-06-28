@@ -381,16 +381,16 @@ def apply_lut(image, lut):
 
 
 def apply_lut_pixel(lut, weights_distances_channels_pixel):
-    result = np.zeros([3], np.float)
+    result = np.zeros(weights_distances_channels_pixel.shape[:-1], np.float)
 
     weights_entries_lut = (
-            weights_distances_channels_pixel[0, ..., np.newaxis, np.newaxis]
-            * weights_distances_channels_pixel[1, np.newaxis, ..., np.newaxis]
-            * weights_distances_channels_pixel[2, np.newaxis, np.newaxis, ...]
+            weights_distances_channels_pixel[..., 0, :, np.newaxis, np.newaxis]
+            * weights_distances_channels_pixel[..., 1, np.newaxis, :, np.newaxis]
+            * weights_distances_channels_pixel[..., 2, np.newaxis, np.newaxis, :]
     )
 
     for idx_channel in range(3):
-        result[idx_channel] = np.sum(weights_entries_lut * lut[..., idx_channel])
+        result[..., idx_channel] = np.sum(weights_entries_lut * lut[..., idx_channel], axis=(-1, -2, -3))
 
     return result
 
