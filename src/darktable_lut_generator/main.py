@@ -209,7 +209,7 @@ def main():
         args.make_unreliable_estimates_red,
         args.make_unchanged_red,
         not args.no_interpolation_unreliable,
-        not args.disable_lens_correction,
+        args.use_lens_correction,
         args.legacy_color,
         not args.disable_image_alignment,
         args.sample_uniform,
