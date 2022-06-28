@@ -746,7 +746,7 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
             shutil.copyfile(path_style_image, path_style_image_temp)
         with path(
                 'darktable_lut_generator.styles',
-                ('raw_lens_correction.dtstyle' if use_lens_correction else 'raw.dtstyle')
+                'raw_lens_correction.dtstyle'
         ) as path_style_raw_default:
             path_style_raw = path_style_raw_user if path_style_raw_user is not None else path_style_raw_default
             path_style_raw_temp = os.path.join(path_styles_temp, 'raw.dtstyle')
@@ -799,6 +799,7 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
                 'darktable-cli' if path_dt_exec is None else path_dt_exec,
                 path_in_image,
                 path_out_image,
+                '--style-overwrite',
                 '--style',
                 get_name_style(path_style_image_temp),
                 *args_common,
@@ -821,10 +822,11 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
                 *args_common,
                 # "--luacmd",
                 # f"local dt = require \"darktable\"; dt.styles.import(\"{path_style_raw_temp}\")"
-            ] if path_style_raw_user is None else [
+            ] if path_style_raw_user is None and not use_lens_correction else [
                 'darktable-cli' if path_dt_exec is None else path_dt_exec,
                 path_in_raw,
                 path_out_raw,
+                '--style-overwrite',
                 '--style',
                 get_name_style(path_style_raw_temp),
                 *args_common,
