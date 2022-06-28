@@ -236,23 +236,23 @@ def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grays
                                            make_interpolated_red, make_unchanged_red, interpolate_unreliable,
                                            interpolate_only_missing_data)
 
-    if dir_out_info is not None:
-        print('Exporting transformed images')
-        path_dir_info_image = os.path.join(dir_out_info, 'reference_and_transformed')
-        if not os.path.exists(path_dir_info_image):
-            os.mkdir(path_dir_info_image)
-        for path_reference, path_raw in tqdm(filepaths_images):
-            raw = cv2.cvtColor(cv2.imread(path_raw, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
-            shutil.copyfile(
-                path_reference,
-                os.path.join(path_dir_info_image, os.path.basename(path_reference))
-            )
-
-            raw_transformed = apply_lut(raw, lut_result_normed)
-            cv2.imwrite(
-                os.path.join(path_dir_info_image, os.path.basename(path_raw)),
-                cv2.cvtColor(raw_transformed, cv2.COLOR_RGB2BGR)
-            )
+    # if dir_out_info is not None:
+    #     print('Exporting transformed images')
+    #     path_dir_info_image = os.path.join(dir_out_info, 'reference_and_transformed')
+    #     if not os.path.exists(path_dir_info_image):
+    #         os.mkdir(path_dir_info_image)
+    #     for path_reference, path_raw in tqdm(filepaths_images):
+    #         raw = cv2.cvtColor(cv2.imread(path_raw, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
+    #         shutil.copyfile(
+    #             path_reference,
+    #             os.path.join(path_dir_info_image, os.path.basename(path_reference))
+    #         )
+    #
+    #         raw_transformed = apply_lut(raw, lut_result_normed)
+    #         cv2.imwrite(
+    #             os.path.join(path_dir_info_image, os.path.basename(path_raw)),
+    #             cv2.cvtColor(raw_transformed, cv2.COLOR_RGB2BGR)
+    #         )
 
     return lut_result_normed
 
@@ -915,8 +915,26 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
                               make_interpolated_red, make_unchanged_red, interpolate_unreliable, do_alignment,
                               sample_uniform, interpolate_only_missing_data)
 
-    print(f'Writing result to {file_out}')
-    write_cube(result, file_out)
+        print(f'Writing result to {file_out}')
+        write_cube(result, file_out)
+
+        if dir_out_info is not None:
+            print('Exporting transformed images')
+            path_dir_info_image = os.path.join(dir_out_info, 'reference_and_transformed')
+            if not os.path.exists(path_dir_info_image):
+                os.mkdir(path_dir_info_image)
+            for path_reference, path_raw in tqdm(filepaths_images_converted):
+                raw = cv2.cvtColor(cv2.imread(path_raw, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
+                shutil.copyfile(
+                    path_reference,
+                    os.path.join(path_dir_info_image, os.path.basename(path_reference))
+                )
+
+                raw_transformed = apply_lut(raw, result)
+                cv2.imwrite(
+                    os.path.join(path_dir_info_image, os.path.basename(path_raw)),
+                    cv2.cvtColor(raw_transformed, cv2.COLOR_RGB2BGR)
+                )
 
     return result
 
