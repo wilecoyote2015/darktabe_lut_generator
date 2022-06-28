@@ -207,7 +207,7 @@ def get_aligned_image_pair(path_reference, path_raw, do_alignment, dir_out_info=
 
 
 def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grayscale, dir_out_info,
-                 make_insufficient_data_red, make_unchanged_red, interpolate_unreliable, do_alignment,
+                 make_interpolated_red, make_unchanged_red, interpolate_unreliable, do_alignment,
                  sample_uniform,
                  interpolate_only_missing_data) -> np.ndarray:
     """
@@ -233,7 +233,7 @@ def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grays
     pixels_references = np.concatenate(pixels_references, axis=0)
 
     lut_result_normed = perform_estimation(pixels_references, pixels_raws, size, is_grayscale, dir_out_info,
-                                           make_insufficient_data_red, make_unchanged_red, interpolate_unreliable,
+                                           make_interpolated_red, make_unchanged_red, interpolate_unreliable,
                                            interpolate_only_missing_data)
 
     return lut_result_normed
@@ -324,23 +324,17 @@ def get_pixels_sample_image_pair(path_reference, path_raw, n_samples, dir_out_in
 
 
 def make_design_matrix(pixels_references, pixels_raws, size):
-    coordinates = np.linspace(0, 1, size)
-    step_size = 1. / (size - 1)
-
     # feature matrix with order of permutation: r, g, b
     print('generating design matrix')
     design_matrix = np.zeros((pixels_references.shape[0], size * size * size), np.float32)
 
-    # [pixel, channel, channel_value]
-    differences_channels = pixels_raws[..., np.newaxis] - np.stack([coordinates] * 3, axis=0)[np.newaxis, ...]
-    differences_channels_relative_grid_steps = differences_channels / step_size
-    weights_distances_channels = np.maximum(1. - np.abs(differences_channels_relative_grid_steps), 0.)
+    weights_distances_channels = make_weights_distances_lut_entries_channels(pixels_raws, size)
 
     idx_design_matrix = 0
     for idx_r in tqdm(range(size)):
         for idx_g in range(size):
             for idx_b in range(size):
-                # for each pixel, get the distance to the current lut grid point
+                # for each pixel, get the distance to the current lut grid point.
                 # from this, the weight of this point is calculated.
                 weights_entry_lut = (
                         weights_distances_channels[..., 0, idx_r]
@@ -372,7 +366,7 @@ def calc_is_trustful_estimate(design_matrix, size):
     return has_enough_data, has_no_data
 
 
-def interpolate_best_missing_lut_entry(lut, indices_sufficient_data, indices_missing_data):
+def interpolate_best_missing_lut_entry(lut, indices_sufficient_data, indices_missing_data, make_interpolated_red):
     lut_result = np.copy(lut)
 
     n_neighbors_missing_data = []
@@ -415,13 +409,13 @@ def interpolate_best_missing_lut_entry(lut, indices_sufficient_data, indices_mis
         index_missing_most_direct_neighbors[0],
         index_missing_most_direct_neighbors[1],
         index_missing_most_direct_neighbors[2],
-    ] = np.mean(direct_neighbors, axis=0)
+    ] = np.mean(direct_neighbors, axis=0) if not make_interpolated_red else np.asarray([1, 0, 0])
     # ] = np.asarray([1, 0, 0])
 
     return lut_result, indices_sufficient_data_result, indices_missing_result
 
 
-def interpolate_unreliable_lut_entries(design_matrix, lut, only_without_data):
+def interpolate_unreliable_lut_entries(design_matrix, lut, only_without_data, make_interpolated_red):
     indices_lut = make_meshgrid_cube_coordinates(lut.shape[0]).reshape([lut.shape[0] ** 3, 3])
     has_enough_data, has_no_data = calc_is_trustful_estimate(design_matrix, lut.shape[0])
 
@@ -437,6 +431,7 @@ def interpolate_unreliable_lut_entries(design_matrix, lut, only_without_data):
             result,
             indices_sufficient_data,
             indices_missing_data,
+            make_interpolated_red
         )
 
     return result
@@ -599,8 +594,7 @@ def fit_channel_lasso(design_matrix, differences_references_raw_channel, idx_cha
 
 
 def perform_estimation(pixels_references, pixels_raws, size, is_grayscale, dir_out_info=None,
-                       make_insufficient_data_red=False,
-                       make_unchanged_red=False, interpolate_unreliable=True,
+                       make_interpolated_red=False, make_unchanged_red=False, interpolate_unreliable=True,
                        interpolate_only_missing_data=False):
     design_matrix = make_design_matrix(pixels_references, pixels_raws, size)
 
@@ -649,19 +643,13 @@ def perform_estimation(pixels_references, pixels_raws, size, is_grayscale, dir_o
             result[..., idx_channel] += lut_difference_channel
 
     if interpolate_unreliable:
-        result = interpolate_unreliable_lut_entries(design_matrix, result, interpolate_only_missing_data)
+        result = interpolate_unreliable_lut_entries(design_matrix, result, interpolate_only_missing_data,
+                                                    make_interpolated_red)
 
     result = np.clip(result, a_min=0., a_max=1.)
 
     if make_unchanged_red:
         result[np.sqrt(np.sum(changes ** 2, axis=-1)) < 0.001] = np.asarray([1., 0., 0.])
-
-    # ### TODO: just for testing
-    if make_insufficient_data_red:
-        has_enough_data, has_no_data = calc_is_trustful_estimate(design_matrix, size)
-        has_enough_data = has_enough_data.reshape([size, size, size])
-        result[np.logical_not(has_enough_data)] = np.asarray([1., 0., 0.])
-    # ###
 
     if dir_out_info is not None:
         save_info_lasso(result, design_matrix, dir_out_info)
@@ -708,7 +696,7 @@ def get_name_style(path_style):
 def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=False, resize=0,
          path_dt_exec=None,
          path_style_image_user=None, path_style_raw_user=None, path_dir_intermediate=None, dir_out_info=None,
-         make_insufficient_data_red=False, make_unchanged_red=False, interpolate_unreliable=True,
+         make_interpolated_red=False, make_unchanged_red=False, interpolate_unreliable=True,
          use_lens_correction=True, legacy_color=False, do_alignment=True,
          sample_uniform=False, interpolate_only_missing_data=False):
     extensions_raw = ['raw', 'raf', 'dng', 'nef', 'cr3', 'arw', 'cr2', 'cr3', 'orf', 'rw2']
@@ -853,7 +841,7 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
         print('Finished converting. Generating LUT.')
         # a halc clut is a cube with level**2 entries on each dimension
         result = estimate_lut(filepaths_images_converted, size, n_pixels_sample, is_grayscale, dir_out_info,
-                              make_insufficient_data_red, make_unchanged_red, interpolate_unreliable, do_alignment,
+                              make_interpolated_red, make_unchanged_red, interpolate_unreliable, do_alignment,
                               sample_uniform, interpolate_only_missing_data)
 
     print(f'Writing result to {file_out}')

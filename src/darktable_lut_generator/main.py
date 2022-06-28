@@ -160,11 +160,12 @@ def main():
         help='Path to directory to output additional information / plots'
     )
     parser.add_argument(
-        '--make_unreliable_estimates_red',
+        '--make_interpolated_estimates_red',
         action='store_true',
-        help='In the resulting LUT, make estimates of colors with unreliably few datapoints red. Useful for debugging and identifying sparsely sampled colors.'
+        help='In the resulting LUT, make estimates of colors that were interpolated due to unreliably few datapoints red. '
+             'Only applies if --no_interpolation_unreliable is not set. Useful for debugging and identifying sparsely sampled colors.'
     )
-    parser.set_defaults(make_unreliable_estimates_red=False)
+    parser.set_defaults(make_interpolated_estimates_red=False)
     parser.add_argument(
         '--make_unchanged_red',
         action='store_true',
@@ -206,7 +207,7 @@ def main():
         args.path_style_raw,
         args.path_dir_intermediate,
         args.path_dir_out_info,
-        args.make_unreliable_estimates_red,
+        args.make_interpolated_estimates_red,
         args.make_unchanged_red,
         not args.no_interpolation_unreliable,
         args.use_lens_correction,
