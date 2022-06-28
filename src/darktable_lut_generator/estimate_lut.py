@@ -856,6 +856,7 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
                               make_insufficient_data_red, make_unchanged_red, interpolate_unreliable, do_alignment,
                               sample_uniform, interpolate_only_missing_data)
 
+    print(f'Writing result to {file_out}')
     write_cube(result, file_out)
 
     return result
