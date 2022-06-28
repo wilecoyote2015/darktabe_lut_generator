@@ -705,7 +705,7 @@ def get_name_style(path_style):
     return str_style.split('<name>')[1].split('</name>')[0]
 
 
-def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=False, resize=0,
+def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=False, resize=0,
          path_dt_exec=None,
          path_style_image_user=None, path_style_raw_user=None, path_dir_intermediate=None, dir_out_info=None,
          make_insufficient_data_red=False, make_unchanged_red=False, interpolate_unreliable=True,
@@ -850,7 +850,7 @@ def main(dir_images, file_out, level=3, n_pixels_sample=100000, is_grayscale=Fal
 
         print('Finished converting. Generating LUT.')
         # a halc clut is a cube with level**2 entries on each dimension
-        result = estimate_lut(filepaths_images_converted, level ** 2, n_pixels_sample, is_grayscale, dir_out_info,
+        result = estimate_lut(filepaths_images_converted, size, n_pixels_sample, is_grayscale, dir_out_info,
                               make_insufficient_data_red, make_unchanged_red, interpolate_unreliable, do_alignment,
                               sample_uniform, interpolate_only_missing_data)
 

@@ -64,11 +64,11 @@ def main():
              'Set to 0 to use all pixels (recommended with resize)'
     )
     parser.add_argument(
-        '--level',
+        '--size',
         type=int,
-        default=3,
-        help='Level (as defined by HaldClut) of output LUT. Resulting cube resolution per dimension is level^2. '
-             'Keep in mind that for high levels, much sample data covering many colors is needed for good generalization '
+        default=9,
+        help='Resulting cube resolution per dimension. '
+             'Keep in mind that for high sizes, much sample data covering many colors is needed for good generalization '
              'performance.'
     )
     parser.add_argument(
@@ -193,7 +193,7 @@ def main():
     main_(
         args.dir_images,
         args.file_lut_output,
-        args.level,
+        args.size,
         args.n_samples if args.n_samples > 0 else None,
         args.is_grayscale,
         args.resize,
