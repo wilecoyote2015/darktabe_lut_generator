@@ -508,7 +508,7 @@ def interpolate_unreliable_lut_entries(design_matrix, lut, only_without_data, ma
     return result
 
 
-def save_info_lasso(lut, design_matrix, dir_out_info):
+def save_info_fitting(lut, design_matrix, dir_out_info):
     # Make 3d cube plot where outline is coordinate of lut node and inner color is mapped color
 
     identity = make_lut_identity_normed(lut.shape[0])
@@ -723,7 +723,7 @@ def perform_estimation(pixels_references, pixels_raws, size, is_grayscale, dir_o
         result[np.sqrt(np.sum(changes ** 2, axis=-1)) < 0.001] = np.asarray([1., 0., 0.])
 
     if dir_out_info is not None:
-        save_info_lasso(result, design_matrix, dir_out_info)
+        save_info_fitting(result, design_matrix, dir_out_info)
 
     print(f'channels rmse without lut: {rmse_pre_channnels}')
     print(f'channels rmse with fitted lut: {rmse_past_channels}')
