@@ -359,7 +359,7 @@ def make_weights_distances_lut_entries_channels(pixels, size):
 
 
 def apply_lut(image, lut):
-    size = int(np.cbrt(lut.size / 3))
+    size = lut.shape[0]
 
     max_value = get_max_value(image)
     image_normed = image.astype(np.float64) / max_value
@@ -367,12 +367,13 @@ def apply_lut(image, lut):
 
     result = np.zeros_like(image_normed)
     # TODO: speed up while still balancing memory usage
+    # result = apply_lut_pixel(lut, weights_distances_channels)
+    # traverse slices instead of interpolating whole image for memory usage limitation
     for idx_y in range(image_normed.shape[0]):
-        for idx_x in range(image_normed.shape[1]):
-            result[idx_y, idx_x] = apply_lut_pixel(
-                lut,
-                weights_distances_channels[idx_y, idx_x]
-            )
+        result[idx_y] = apply_lut_pixel(
+            lut,
+            weights_distances_channels[idx_y]
+        )
 
     result *= max_value
 
