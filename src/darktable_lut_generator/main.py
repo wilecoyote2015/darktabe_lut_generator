@@ -92,11 +92,15 @@ def main():
     parser.set_defaults(sample_uniform=False)
 
     parser.add_argument(
-        '--disable_lens_correction',
+        '--use_lens_correction',
         action='store_true',
-        help='Disable auto-applied lens correction module for the RAW image. Only effective without --path_style_raw'
+        help='Use auto-applied lens correction module for the RAW image. Only effective without --path_style_raw.'
+             ' Note that lens correction is a bit tricky as it can change the exposure, so that the resulting LUT may only yield good results'
+             'for images with the same lens and lens correction applied. It should be preferred to not use lens correctio and'
+             ' also disable lens correction in camera. This setting is mainly intended for use with cameras that do not allow'
+             ' disabling in-camera lens correction for the OOC JPEGs.'
     )
-    parser.set_defaults(disable_lens_correction=False)
+    parser.set_defaults(use_lens_correction=False)
     parser.add_argument(
         '--disable_image_alignment',
         action='store_true',
