@@ -124,6 +124,12 @@ def main():
     )
     parser.set_defaults(disable_image_alignment=False)
     parser.add_argument(
+        '--align_translation_only',
+        action='store_true',
+        help='Use translation instead of affine transform for alignment..'
+    )
+    parser.set_defaults(align_translation_only=False)
+    parser.add_argument(
         '--legacy_color',
         action='store_true',
         help='Use legacy color adaption for raw development'
@@ -219,6 +225,7 @@ def main():
         args.use_lens_correction,
         args.legacy_color,
         not args.disable_image_alignment,
+        args.align_translation_only,
         args.sample_uniform,
         args.interpolate_only_missing_data
     )

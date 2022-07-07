@@ -82,7 +82,7 @@ from scipy import ndimage
 #     H, _ = cv.findHomography( features0.matched_pts, \
 #         features1.matched_pts, cv.RANSAC, 5.0)
 
-def align_images_ecc(im1, im2):
+def align_images_ecc(im1, im2, edge_detection=True, translation_only=False):
     """Align image 1 to image 2.
     From https://learnopencv.com/image-alignment-ecc-in-opencv-c-python/"""
     # Convert images to grayscale
@@ -93,8 +93,16 @@ def align_images_ecc(im1, im2):
     im1_gray = ((im1_gray - np.min(im1_gray)) / (np.max(im1_gray) - np.min(im1_gray))).astype(np.float32)
     im2_gray = ((im2_gray - np.min(im2_gray)) / (np.max(im2_gray) - np.min(im2_gray))).astype(np.float32)
 
+    if edge_detection:
+        # im1_gray = cv2.Sobel(src=im1_gray, ddepth=cv2.CV_32F, dx=1, dy=1, ksize=5)
+        im1_gray = cv2.Laplacian(src=im1_gray, ddepth=cv2.CV_32F, ksize=5)
+        # im1_gray = cv2.Canny(im1_gray, 100, 100)
+        # im2_gray = cv2.Sobel(src=im2_gray, ddepth=cv2.CV_32F, dx=1, dy=1, ksize=5)
+        im2_gray = cv2.Laplacian(src=im2_gray, ddepth=cv2.CV_32F, ksize=5)
+        # im2_gray = cv2.Canny(im2_gray, 100, 100)
+
     # Define the motion model
-    warp_mode = cv2.MOTION_AFFINE
+    warp_mode = cv2.MOTION_TRANSLATION if translation_only else cv2.MOTION_AFFINE
 
     # Define 2x3 or 3x3 matrices and initialize the matrix to identity
     if warp_mode == cv2.MOTION_HOMOGRAPHY:
@@ -142,7 +150,7 @@ def get_max_value(image: np.ndarray):
         raise NotImplementedError
 
 
-def get_aligned_image_pair(path_reference, path_raw, do_alignment, dir_out_info=None):
+def get_aligned_image_pair(path_reference, path_raw, do_alignment, translation_only, dir_out_info=None):
     reference = cv2.cvtColor(cv2.imread(path_reference, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
     raw = cv2.cvtColor(cv2.imread(path_raw, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
 
@@ -156,7 +164,8 @@ def get_aligned_image_pair(path_reference, path_raw, do_alignment, dir_out_info=
         print(f'aligning image {path_reference}')
         reference_aligned, mask = align_images_ecc(
             reference,
-            raw
+            raw,
+            translation_only=translation_only
         )
         raw_aligned = raw
     else:
@@ -208,6 +217,7 @@ def get_aligned_image_pair(path_reference, path_raw, do_alignment, dir_out_info=
 
 def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grayscale, dir_out_info,
                  make_interpolated_red, make_unchanged_red, interpolate_unreliable, do_alignment,
+                 align_translation_only,
                  sample_uniform,
                  interpolate_only_missing_data) -> np.ndarray:
     """
@@ -224,7 +234,8 @@ def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grays
             int(n_pixels_sample / len(filepaths_images)) if n_pixels_sample is not None else None,
             dir_out_info,
             do_alignment,
-            sample_uniform
+            sample_uniform,
+            align_translation_only
         )
         pixels_raws.append(pixels_raw)
         pixels_references.append(pixels_reference)
@@ -315,8 +326,10 @@ def sample_indices_pixels(pixels, n_samples, uniform=False, size_batch_uniform=1
     return indices_sampled
 
 
-def get_pixels_sample_image_pair(path_reference, path_raw, n_samples, dir_out_info, do_alignment, sample_uniform):
-    reference, raw, mask = get_aligned_image_pair(path_reference, path_raw, do_alignment, dir_out_info)
+def get_pixels_sample_image_pair(path_reference, path_raw, n_samples, dir_out_info, do_alignment, sample_uniform,
+                                 align_translation_only):
+    reference, raw, mask = get_aligned_image_pair(path_reference, path_raw, do_alignment, align_translation_only,
+                                                  dir_out_info)
     max_value = get_max_value(reference)
 
     pixels_reference = np.reshape(
@@ -770,6 +783,7 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
          path_style_image_user=None, path_style_raw_user=None, path_dir_intermediate=None, dir_out_info=None,
          make_interpolated_red=False, make_unchanged_red=False, interpolate_unreliable=True,
          use_lens_correction=True, legacy_color=False, do_alignment=True,
+         align_translation_only=False,
          sample_uniform=False, interpolate_only_missing_data=False):
     extensions_raw = ['raw', 'raf', 'dng', 'nef', 'cr3', 'arw', 'cr2', 'cr3', 'orf', 'rw2']
     extensions_image = ['jpg', 'jpeg', 'tiff', 'tif', 'png']
@@ -914,7 +928,7 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
         # a halc clut is a cube with level**2 entries on each dimension
         result = estimate_lut(filepaths_images_converted, size, n_pixels_sample, is_grayscale, dir_out_info,
                               make_interpolated_red, make_unchanged_red, interpolate_unreliable, do_alignment,
-                              sample_uniform, interpolate_only_missing_data)
+                              align_translation_only, sample_uniform, interpolate_only_missing_data)
 
         print(f'Writing result to {file_out}')
         write_cube(result, file_out)
