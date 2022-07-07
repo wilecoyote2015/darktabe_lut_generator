@@ -16,12 +16,16 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 import shutil
+from scipy.optimize import linprog
 import time
+from scipy import sparse
 
+from plotly.subplots import make_subplots
 import numpy as np
 import cv2
 import scipy.optimize
-from sklearn.linear_model import Lasso
+from sklearn.linear_model import Lasso, QuantileRegressor
+from cvxopt import matrix, solvers
 import logging
 from tqdm import tqdm
 import tempfile
@@ -32,6 +36,7 @@ from importlib.resources import path
 from scipy.spatial import KDTree
 from scipy.optimize import lsq_linear
 from scipy import ndimage
+
 
 
 # FIXME: Something is wron with the export from darktable via command line:
@@ -348,11 +353,27 @@ def get_pixels_sample_image_pair(path_reference, path_raw, n_samples, dir_out_in
     )[np.reshape(mask, mask.shape[0] * mask.shape[1])]
 
     indices_sample = sample_indices_pixels(pixels_raw, n_samples, uniform=sample_uniform)
-    result_raw = pixels_raw[indices_sample].astype(np.float64) / max_value
-    result_reference = pixels_reference[indices_sample].astype(np.float64) / max_value
+    result_raw = pixels_raw[indices_sample].astype(np.float32) / max_value
+    result_reference = pixels_reference[indices_sample].astype(np.float32) / max_value
 
     return result_reference, result_raw, max_value
 
+
+# def make_weights_distances_lut_entries_channels(pixels, size):
+#     """ Get trilinear interpolation weights for LUT entries for each piel coordinate of the lut for one color axis.
+#     """
+#     coordinates = np.linspace(0, 1, size)
+#     step_size = 1. / (size - 1)
+#
+#     # differences_channels is [... (pixels), channel, lut coordinate]
+#     differences_channels = (
+#             pixels[..., np.newaxis]
+#             - np.expand_dims(np.stack([coordinates] * 3, axis=0), [i for i in range(pixels.ndim - 2)])
+#     )
+#     differences_channels_relative_grid_steps = differences_channels / step_size
+#     weights_distances_channels = np.maximum(1. - np.abs(differences_channels_relative_grid_steps), 0.)
+#
+#     return weights_distances_channels
 
 def make_weights_distances_lut_entries_channels(pixels, size):
     """ Get trilinear interpolation weights for LUT entries for each piel coordinate of the lut for one color axis.
@@ -369,7 +390,6 @@ def make_weights_distances_lut_entries_channels(pixels, size):
     weights_distances_channels = np.maximum(1. - np.abs(differences_channels_relative_grid_steps), 0.)
 
     return weights_distances_channels
-
 
 def apply_lut(image, lut):
     size = lut.shape[0]
@@ -522,7 +542,7 @@ def interpolate_unreliable_lut_entries(design_matrix, lut, only_without_data, ma
     return result
 
 
-def save_info_fitting(lut, design_matrix, dir_out_info):
+def save_info_fitting(lut, design_matrix, dir_out_info, residuals_channels, pixels_references, pixels_raws):
     # Make 3d cube plot where outline is coordinate of lut node and inner color is mapped color
 
     identity = make_lut_identity_normed(lut.shape[0])
@@ -584,7 +604,303 @@ def save_info_fitting(lut, design_matrix, dir_out_info):
 
     fig.write_html(os.path.join(dir_out_info, 'lut_no_datapoints.html'))
 
-    # 3d Cube where outline is whether data is missing
+    # Residuals and datapoints
+    for idx_channel, residuals_channel in enumerate(residuals_channels):
+        fig = make_subplots(2, 2,
+                            specs=[
+                                [
+                                    {'type': 'scene'},
+                                    {'type': 'scene'},
+                                ],
+                                [
+                                    {'type': 'scene'},
+                                    {'type': 'xy'},
+                                ]
+                            ]
+                            )
+
+        fig.add_trace(
+            go.Scatter3d(
+                x=pixels_raws[:, 0],
+                y=pixels_raws[:, 1],
+                z=residuals_channel,
+                mode='markers',
+                marker={'size': 1}
+            ),
+            col=1,
+            row=1
+        )
+
+        fig.add_trace(
+            go.Scatter3d(
+                x=pixels_raws[:, 0],
+                y=pixels_raws[:, 2],
+                z=residuals_channel,
+                mode='markers',
+                marker={'size': 1}
+            ),
+            col=2,
+            row=1
+        )
+        fig.add_trace(
+            go.Scatter3d(
+                x=pixels_raws[:, 1],
+                y=pixels_raws[:, 2],
+                z=residuals_channel,
+                mode='markers',
+                marker={'size': 1}
+            ),
+            col=1,
+            row=2
+        )
+
+        fig.add_trace(
+            go.Histogram(
+                x=residuals_channel
+            ),
+            col=2,
+            row=2
+        )
+
+        # Update xaxis properties
+        fig.update_xaxes(title_text="channel 0", row=1, col=1)
+        fig.update_xaxes(title_text="channel 0", row=1, col=2)
+        fig.update_xaxes(title_text="channel 1", row=2, col=1)
+        fig.update_xaxes(title_text="residual", row=2, col=2)
+
+        # Update yaxis properties
+        fig.update_yaxes(title_text="channel 1", row=1, col=1)
+        fig.update_yaxes(title_text="channel 2", row=1, col=2)
+        fig.update_yaxes(title_text="channel 2", row=2, col=1)
+        fig.update_yaxes(title_text="count", row=2, col=2)
+
+        fig.write_html(os.path.join(dir_out_info, f'residuals_channel_{idx_channel}.html'))
+
+        ##### Datapoints
+        fig = make_subplots(2, 2,
+                            specs=[
+                                [
+                                    {'type': 'scene'},
+                                    {'type': 'scene'},
+                                ],
+                                [
+                                    {'type': 'scene'},
+                                    {'type': 'xy'},
+                                ]
+                            ]
+                            )
+
+        fig.add_trace(
+            go.Scatter3d(
+                x=pixels_raws[:, 0],
+                y=pixels_raws[:, 1],
+                z=pixels_references[:, idx_channel],
+                mode='markers',
+                marker={'size': 1}
+            ),
+            col=1,
+            row=1
+        )
+
+        fig.add_trace(
+            go.Scatter3d(
+                x=pixels_raws[:, 0],
+                y=pixels_raws[:, 2],
+                z=pixels_references[:, idx_channel],
+                mode='markers',
+                marker={'size': 1}
+            ),
+            col=2,
+            row=1
+        )
+        fig.add_trace(
+            go.Scatter3d(
+                x=pixels_raws[:, 1],
+                y=pixels_raws[:, 2],
+                z=pixels_references[:, idx_channel],
+                mode='markers',
+                marker={'size': 1}
+            ),
+            col=1,
+            row=2
+        )
+
+        fig.add_trace(
+            go.Histogram(
+                x=pixels_raws[:, idx_channel]
+            ),
+            col=2,
+            row=2
+        )
+
+        # Update xaxis properties
+        fig.update_xaxes(title_text="raw channel 0", row=1, col=1)
+        fig.update_xaxes(title_text="raw channel 0", row=1, col=2)
+        fig.update_xaxes(title_text="raw channel 1", row=2, col=1)
+        fig.update_xaxes(title_text=f"RAW channel {idx_channel}", row=2, col=2)
+
+        # Update yaxis properties
+        fig.update_yaxes(title_text="raw channel 1", row=1, col=1)
+        fig.update_yaxes(title_text="raw channel 2", row=1, col=2)
+        fig.update_yaxes(title_text="raw channel 2", row=2, col=1)
+        fig.update_yaxes(title_text="count", row=2, col=2)
+
+        fig.write_html(os.path.join(dir_out_info, f'datapoints_channel_{idx_channel}.html'))
+
+
+#
+def constrained_quantile_regression(design_matrix, y, bounds_lower, bounds_upper, quantile=0.5):
+    # Simple linear programming implementation of constrained quantile regression
+    #   adapted from h
+    #   ttps://stats.stackexchange.com/questions/384909/formulating-quantile-regression-as-linear-programming-problem
+
+    K = design_matrix.shape[1]
+    N = design_matrix.shape[0]
+
+    # equality constraints - left hand side
+
+    A1 = design_matrix  # intercepts & data points - positive weights
+    A2 = design_matrix * - 1  # intercept & data points - negative weights
+    A3 = np.identity(N, dtype=design_matrix.dtype)  # error - positive
+    A4 = np.identity(N, dtype=design_matrix.dtype) * -1  # error - negative
+
+    A_eq = np.concatenate((A1, A2, A3, A4), axis=1)  # all the equality constraints
+
+    # equality constraints - right hand side
+    b_eq = y
+
+    # goal function - intercept & data points have 0 weights
+    # positive error has tau weight, negative error has 1-tau weight
+    c = np.concatenate((np.repeat(0, 2 * K), quantile * np.repeat(1, N), (1 - quantile) * np.repeat(1, N))).astype(
+        design_matrix.dtype)
+
+    # all variables must be greater than zero
+    # adding inequality constraints - left hand side
+    n = A_eq.shape[-1]
+    A_ub = np.full((n, n), 0., dtype=design_matrix.dtype)
+    A_ub[::n + 1] = -1.0
+
+    # adding inequality constraints - right hand side (all zeros)
+    b_ub = np.full((n, 1), 0., dtype=design_matrix.dtype)
+
+    # add parameter bounda
+    print('Inserting bounds into constraint arrays')
+    zeros = np.zeros((1, n), dtype=design_matrix.dtype)
+    bounds_left = []
+    bounds_right = []
+    for idx_parameter in range(K):
+        bounds_left_upper_param = zeros.copy()
+        bounds_left_upper_param[0, [idx_parameter, idx_parameter + K]] = np.asarray([1, -1], dtype=design_matrix.dtype)
+        bounds_right_upper_param = np.full((1, 1), bounds_upper[idx_parameter], dtype=design_matrix.dtype)
+
+        bounds_left.append(bounds_left_upper_param)
+        bounds_right.append(bounds_right_upper_param)
+        # A_ub = np.concatenate([A_ub, bounds_left_upper_param], axis=0)
+        # b_ub = np.concatenate([b_ub, bounds_right_upper_param], axis=0)
+
+        bounds_left_lower_param = zeros.copy()
+        bounds_left_lower_param[0, [idx_parameter, idx_parameter + K]] = np.asarray([-1, 1], dtype=design_matrix.dtype)
+        bounds_right_lower_param = np.full((1, 1), -bounds_lower[idx_parameter], dtype=design_matrix.dtype)
+
+        bounds_left.append(bounds_left_lower_param)
+        bounds_right.append(bounds_right_lower_param)
+
+        # A_ub = np.concatenate([A_ub, bounds_left_lower_param], axis=0)
+        # b_ub = np.concatenate([b_ub, bounds_right_lower_param], axis=0)
+
+    A_ub = np.concatenate([A_ub, *bounds_left], axis=0)
+    b_ub = np.concatenate([b_ub, *bounds_right], axis=0)
+
+    print('Making sparse matrices')
+
+    # c = scipy.sparse.csc_array(c)
+    A_ub = scipy.sparse.csc_array(A_ub)
+    # b_ub = scipy.sparse.csc_array(b_ub)
+    A_eq = scipy.sparse.csc_array(A_eq)
+    # b_eq = scipy.sparse.csc_array(b_eq)
+
+    print('Starting fit')
+    res = linprog(
+        c,
+        A_ub=A_ub,
+        b_ub=b_ub,
+        A_eq=A_eq,
+        b_eq=b_eq,
+        method='highs-ds'
+    )
+
+    x = res.x
+
+    # both negative and positive components get values above zero, this gets fixed here
+    coefficients = x[:K] - x[K:2 * K]
+
+    return coefficients
+
+
+# def constrained_quantile_regression(design_matrix, y, bounds_lower, bounds_upper, quantile=0.5):
+#     # Simple linear programming implementation of constrained quantile regression
+#     #   adapted from h
+#     #   ttps://stats.stackexchange.com/questions/384909/formulating-quantile-regression-as-linear-programming-problem
+#
+#     K = design_matrix.shape[1]
+#     N = design_matrix.shape[0]
+#
+#     # equality constraints - left hand side
+#
+#     A1 = design_matrix  # intercepts & data points - positive weights
+#     A2 = design_matrix * - 1  # intercept & data points - negative weights
+#     A3 = np.identity(N)  # error - positive
+#     A4 = np.identity(N) * -1  # error - negative
+#
+#     A_eq = np.concatenate((A1, A2, A3, A4), axis=1)  # all the equality constraints
+#
+#     # equality constraints - right hand side
+#     b_eq = y
+#
+#     # goal function - intercept & data points have 0 weights
+#     # positive error has tau weight, negative error has 1-tau weight
+#     c = np.concatenate((np.repeat(0, 2 * K), quantile * np.repeat(1, N), (1 - quantile) * np.repeat(1, N)))
+#
+#     # all variables must be greater than zero
+#     # adding inequality constraints - left hand side
+#     n = A_eq.shape[-1]
+#     A_ub = np.full((n, n), 0.)
+#     A_ub[::n + 1] = -1.0
+#
+#     # adding inequality constraints - right hand side (all zeros)
+#     b_ub = np.full((n, 1), 0.)
+#
+#     # add parameter bounda
+#     for idx_parameter in range(K):
+#         bounds_left_upper_param = np.zeros((1, n))
+#         bounds_left_upper_param[0, [idx_parameter, idx_parameter + K]] = np.asarray([1, -1])
+#         bounds_right_upper_param = np.full((1, 1), bounds_upper[idx_parameter])
+#
+#         A_ub = np.concatenate([A_ub, bounds_left_upper_param], axis=0)
+#         b_ub = np.concatenate([b_ub, bounds_right_upper_param], axis=0)
+#
+#         bounds_left_lower_param = np.zeros((1, n))
+#         bounds_left_lower_param[0, [idx_parameter, idx_parameter + K]] = np.asarray([-1, 1])
+#         bounds_right_lower_param = np.full((1, 1), -bounds_lower[idx_parameter])
+#
+#         A_ub = np.concatenate([A_ub, bounds_left_lower_param], axis=0)
+#         b_ub = np.concatenate([b_ub, bounds_right_lower_param], axis=0)
+#
+#     sol = solvers.lp(
+#         c,
+#         A_eq,
+#         b_eq,
+#         A_ub,
+#         b_ub,
+#         solver='glpk'
+#     )
+#
+#     x = sol['X']
+#
+#     # both negative and positive components get values above zero, this gets fixed here
+#     coefficients = x[:K] - x[K:2 * K]
+#
+#     return coefficients
 
 
 def fit_channel_smoothness_penalty(design_matrix, differences_references_raw_channel, idx_channel, size):
@@ -640,10 +956,50 @@ def fit_channel_smoothness_penalty(design_matrix, differences_references_raw_cha
     return coeffs_rescaled
 
 
+def fit_channel_constrained_abs_dev(design_matrix, differences_references_raw_channel, idx_channel, size):
+    stds = np.std(design_matrix, axis=0)
+    stds[stds == 0] = 1.
+    identity = make_lut_identity_normed(size, dtype=design_matrix.dtype)
+
+    design_matrix_scaled = design_matrix / stds[np.newaxis, ...]
+
+    bounds_lower = (-1 * identity[..., idx_channel].reshape([size ** 3]))
+    bounds_lower_scaled = bounds_lower * stds
+    bounds_upper = (1. - identity[..., idx_channel]).reshape([size ** 3])
+    bounds_upper_scaled = bounds_upper * stds
+
+    # regression = LinearRegression(fit_intercept=False)
+    # print('Calculating OLS solution as start parameters')
+    # result_opt_ols = lsq_linear(design_matrix_scaled, differences_references_raw_channel)
+    print('Calculating least absolute deviation solution')
+    # TODO: parameter bounds
+    #   https://stats.stackexchange.com/questions/384909/formulating-quantile-regression-as-linear-programming-problem
+    # regressor = QuantileRegressor(
+    #     quantile=0.5,
+    #     fit_intercept=False,
+    #     solver='highs',
+    #     alpha=0.,
+    #     # solver_options={'bounds': zip(bounds_lower_scaled, bounds_upper_scaled)}
+    #     # solver_options={'bounds': bounds}
+    # ).fit(design_matrix_scaled, differences_references_raw_channel)
+
+    coeffs = constrained_quantile_regression(
+        design_matrix_scaled,
+        differences_references_raw_channel,
+        bounds_lower_scaled,
+        bounds_upper_scaled
+    )
+
+    # coeffs = regressor.coef_
+    coeffs_rescaled = coeffs / stds
+
+    return coeffs_rescaled
+
+
 def fit_channel_constrained(design_matrix, differences_references_raw_channel, idx_channel, size):
     stds = np.std(design_matrix, axis=0)
     stds[stds == 0] = 1.
-    identity = make_lut_identity_normed(size)
+    identity = make_lut_identity_normed(size, dtype=design_matrix.dtype)
 
     design_matrix_scaled = design_matrix / stds[np.newaxis, ...]
 
@@ -654,7 +1010,9 @@ def fit_channel_constrained(design_matrix, differences_references_raw_channel, i
 
     # regression = LinearRegression(fit_intercept=False)
     result_opt = lsq_linear(design_matrix_scaled, differences_references_raw_channel,
-                            (bounds_lower_scaled, bounds_upper_scaled))
+                            (bounds_lower_scaled, bounds_upper_scaled),
+                            method='bvls'
+                            )
     coeffs_rescaled = result_opt.x / stds
 
     return coeffs_rescaled
@@ -694,9 +1052,13 @@ def perform_estimation(pixels_references, pixels_raws, size, is_grayscale, dir_o
     stds = np.std(design_matrix, axis=0)
     stds[stds == 0] = 1.
 
+    residuals_channels = []
+
     for idx_channel in range(3):
         rmse_pre_channnels.append(np.sqrt(np.mean(differences_references_raw[..., idx_channel] ** 2)))
+        print(f'estimating channel {idx_channel}')
 
+        # coefficients = fit_channel_constrained_abs_dev(
         coefficients = fit_channel_constrained(
             design_matrix,
             differences_references_raw[..., idx_channel],
@@ -704,11 +1066,14 @@ def perform_estimation(pixels_references, pixels_raws, size, is_grayscale, dir_o
             size
         )
 
+        residuals_channels.append(
+            differences_references_raw[..., idx_channel]
+            - np.matmul(design_matrix, coefficients)
+        )
+
         rmse_past_channels.append(
             np.sqrt(np.mean(
-                (
-                        differences_references_raw[..., idx_channel]
-                        - np.matmul(design_matrix, coefficients)) ** 2
+                residuals_channels[-1] ** 2
             ))
         )
         lut_difference_channel = np.reshape(coefficients, [size, size, size])
@@ -737,7 +1102,7 @@ def perform_estimation(pixels_references, pixels_raws, size, is_grayscale, dir_o
         result[np.sqrt(np.sum(changes ** 2, axis=-1)) < 0.001] = np.asarray([1., 0., 0.])
 
     if dir_out_info is not None:
-        save_info_fitting(result, design_matrix, dir_out_info)
+        save_info_fitting(result, design_matrix, dir_out_info, residuals_channels, pixels_references, pixels_raws)
 
     print(f'channels rmse without lut: {rmse_pre_channnels}')
     print(f'channels rmse with fitted lut: {rmse_past_channels}')
@@ -757,7 +1122,7 @@ def make_meshgrid_cube_coordinates(size):
     )
 
 
-def make_lut_identity_normed(size):
+def make_lut_identity_normed(size, dtype=np.float32):
     # identity with [r,g,b, channel]
     result = np.stack(
         np.meshgrid(
@@ -767,7 +1132,7 @@ def make_lut_identity_normed(size):
             indexing='ij'
         ),
         axis=-1
-    )
+    ).astype(dtype)
 
     return result
 
