@@ -85,12 +85,19 @@ from scipy import ndimage
 #     H, _ = cv.findHomography( features0.matched_pts, \
 #         features1.matched_pts, cv.RANSAC, 5.0)
 
-def align_images_ecc(im1, im2, edge_detection=True, translation_only=False):
+def align_images_ecc(im1, im2, edge_detection=False, translation_only=False, dir_out_info=None, name_1=None,
+                     name_2=None):
     """Align image 1 to image 2.
     From https://learnopencv.com/image-alignment-ecc-in-opencv-c-python/"""
     # Convert images to grayscale
-    im1_gray = cv2.cvtColor(im1, cv2.COLOR_BGR2GRAY)
-    im2_gray = cv2.cvtColor(im2, cv2.COLOR_BGR2GRAY)
+    im1_gray = cv2.cvtColor(
+        im1,
+        cv2.COLOR_BGR2GRAY
+    )
+    im2_gray = cv2.cvtColor(
+        im2,
+        cv2.COLOR_BGR2GRAY
+    )
 
     # min max scaling
     im1_gray = ((im1_gray - np.min(im1_gray)) / (np.max(im1_gray) - np.min(im1_gray))).astype(np.float32)
@@ -98,11 +105,32 @@ def align_images_ecc(im1, im2, edge_detection=True, translation_only=False):
 
     if edge_detection:
         # im1_gray = cv2.Sobel(src=im1_gray, ddepth=cv2.CV_32F, dx=1, dy=1, ksize=5)
-        im1_gray = cv2.Laplacian(src=im1_gray, ddepth=cv2.CV_32F, ksize=5)
+        # TODO: better noise reduction than gauss
+        im1_gray_edge = cv2.Sobel(src=cv2.GaussianBlur(im1_gray, (3, 3), 0), ddepth=cv2.CV_32F, dx=3, dy=3)
+        # im1_gray_edge = cv2.Canny((im1_gray*255).astype(np.uint8), threshold1=0, threshold2=50).astype(np.float32) / 255.
+        im1_gray_edge = (
+                (im1_gray_edge - np.min(im1_gray_edge)) / (np.max(im1_gray_edge) - np.min(im1_gray_edge))).astype(
+            np.float32)
         # im1_gray = cv2.Canny(im1_gray, 100, 100)
         # im2_gray = cv2.Sobel(src=im2_gray, ddepth=cv2.CV_32F, dx=1, dy=1, ksize=5)
-        im2_gray = cv2.Laplacian(src=im2_gray, ddepth=cv2.CV_32F, ksize=5)
+        # im2_gray_edge = cv2.Laplacian(src=im2_gray, ddepth=cv2.CV_32F, ksize=1)
+        im2_gray_edge = cv2.Sobel(src=cv2.GaussianBlur(im2_gray, (3, 3), 0), ddepth=cv2.CV_32F, dx=3, dy=3)
+        im2_gray_edge = (
+                (im2_gray_edge - np.min(im2_gray_edge)) / (np.max(im2_gray_edge) - np.min(im2_gray_edge))).astype(
+            np.float32)
+
         # im2_gray = cv2.Canny(im2_gray, 100, 100)
+
+    if dir_out_info is not None and name_1 is not None and name_2 is not None:
+        path_dir_info_export = os.path.join(dir_out_info, 'alignment')
+        max_ = get_max_value(np.zeros((1, 1), dtype=np.uint8))
+        if not os.path.exists(path_dir_info_export):
+            os.makedirs(path_dir_info_export)
+        cv2.imwrite(os.path.join(path_dir_info_export, f'{name_1}_grayscale.png'), im1_gray * max_)
+        cv2.imwrite(os.path.join(path_dir_info_export, f'{name_2}_grayscale.png'), im2_gray * max_)
+        if edge_detection:
+            cv2.imwrite(os.path.join(path_dir_info_export, f'{name_1}_edges.png'), im1_gray_edge * max_)
+            cv2.imwrite(os.path.join(path_dir_info_export, f'{name_2}_edges.png'), im2_gray_edge * max_)
 
     # Define the motion model
     warp_mode = cv2.MOTION_TRANSLATION if translation_only else cv2.MOTION_AFFINE
@@ -125,6 +153,8 @@ def align_images_ecc(im1, im2, edge_detection=True, translation_only=False):
 
     # Run the ECC algorithm. The results are stored in warp_matrix.
     (cc, warp_matrix) = cv2.findTransformECC(im2_gray, im1_gray, warp_matrix, warp_mode, criteria)
+    if edge_detection:
+        (cc, warp_matrix) = cv2.findTransformECC(im2_gray_edge, im1_gray_edge, warp_matrix, warp_mode, criteria)
 
     mask_ones = np.full_like(im1[..., 0], get_max_value(im1))
 
@@ -153,7 +183,8 @@ def get_max_value(image: np.ndarray):
         raise NotImplementedError
 
 
-def get_aligned_image_pair(path_reference, path_raw, do_alignment, translation_only, dir_out_info=None):
+def get_aligned_image_pair(path_reference, path_raw, do_alignment, translation_only, dir_out_info=None,
+                           lut_alignment=None):
     reference = cv2.cvtColor(cv2.imread(path_reference, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
     raw = cv2.cvtColor(cv2.imread(path_raw, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
 
@@ -167,10 +198,15 @@ def get_aligned_image_pair(path_reference, path_raw, do_alignment, translation_o
         print(f'aligning image {path_reference}')
         reference_aligned, mask = align_images_ecc(
             reference,
-            raw,
-            translation_only=translation_only
+            apply_lut(raw, lut_alignment) if lut_alignment is not None else raw,
+            translation_only=translation_only,
+            dir_out_info=dir_out_info,
+            name_1=os.path.basename(path_reference),
+            name_2=os.path.basename(path_raw)
         )
         raw_aligned = raw
+        print('Finished alignment')
+
     else:
         diff_size = np.asarray(raw.shape[:2]) - np.asarray(reference.shape[:2])
         crop_one_side = diff_size / 2
@@ -201,7 +237,6 @@ def get_aligned_image_pair(path_reference, path_raw, do_alignment, translation_o
 
         mask = np.full_like(reference_aligned[..., 0], get_max_value(reference_aligned))
 
-    print('Finished alignment')
     mask_result = mask == get_max_value(reference)
     if dir_out_info is not None:
         path_dir_info_export = os.path.join(dir_out_info, 'alignment')
@@ -222,7 +257,7 @@ def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grays
                  make_interpolated_red, make_unchanged_red, interpolate_unreliable, do_alignment,
                  align_translation_only,
                  sample_uniform,
-                 interpolate_only_missing_data) -> np.ndarray:
+                 interpolate_only_missing_data, lut_alignment=None) -> np.ndarray:
     """
     :param filepaths_images: paths of image pairs: [reference, vanilla raw development]
     :return:
@@ -231,15 +266,22 @@ def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grays
     pixels_raws = []
     pixels_references = []
     for path_reference, path_raw in tqdm(filepaths_images):
-        pixels_reference, pixels_raw, max_value = get_pixels_sample_image_pair(
-            path_reference,
-            path_raw,
-            int(n_pixels_sample / len(filepaths_images)) if n_pixels_sample is not None else None,
-            dir_out_info,
-            do_alignment,
-            sample_uniform,
-            align_translation_only
-        )
+        try:
+            pixels_reference, pixels_raw, max_value = get_pixels_sample_image_pair(
+                path_reference,
+                path_raw,
+                int(n_pixels_sample / len(filepaths_images)) if n_pixels_sample is not None else None,
+                dir_out_info,
+                do_alignment,
+                sample_uniform,
+                align_translation_only,
+                lut_alignment
+            )
+        except Exception as e:
+            print(f'Image Alignment failed for images {os.path.basename(path_reference)}, {os.path.basename(path_raw)}.'
+                  f'Skipping image.: {e}')
+            continue
+
         pixels_raws.append(pixels_raw)
         pixels_references.append(pixels_reference)
 
@@ -249,24 +291,6 @@ def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grays
     lut_result_normed = perform_estimation(pixels_references, pixels_raws, size, is_grayscale, dir_out_info,
                                            make_interpolated_red, make_unchanged_red, interpolate_unreliable,
                                            interpolate_only_missing_data)
-
-    # if dir_out_info is not None:
-    #     print('Exporting transformed images')
-    #     path_dir_info_image = os.path.join(dir_out_info, 'reference_and_transformed')
-    #     if not os.path.exists(path_dir_info_image):
-    #         os.mkdir(path_dir_info_image)
-    #     for path_reference, path_raw in tqdm(filepaths_images):
-    #         raw = cv2.cvtColor(cv2.imread(path_raw, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
-    #         shutil.copyfile(
-    #             path_reference,
-    #             os.path.join(path_dir_info_image, os.path.basename(path_reference))
-    #         )
-    #
-    #         raw_transformed = apply_lut(raw, lut_result_normed)
-    #         cv2.imwrite(
-    #             os.path.join(path_dir_info_image, os.path.basename(path_raw)),
-    #             cv2.cvtColor(raw_transformed, cv2.COLOR_RGB2BGR)
-    #         )
 
     return lut_result_normed
 
@@ -330,9 +354,9 @@ def sample_indices_pixels(pixels, n_samples, uniform=False, size_batch_uniform=1
 
 
 def get_pixels_sample_image_pair(path_reference, path_raw, n_samples, dir_out_info, do_alignment, sample_uniform,
-                                 align_translation_only):
+                                 align_translation_only, lut_alignment):
     reference, raw, mask = get_aligned_image_pair(path_reference, path_raw, do_alignment, align_translation_only,
-                                                  dir_out_info)
+                                                  dir_out_info, lut_alignment)
     max_value = get_max_value(reference)
 
     pixels_reference = np.reshape(
@@ -1147,7 +1171,7 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
          make_interpolated_red=False, make_unchanged_red=False, interpolate_unreliable=True,
          use_lens_correction=True, legacy_color=False, do_alignment=True,
          align_translation_only=False,
-         sample_uniform=False, interpolate_only_missing_data=False):
+         sample_uniform=False, interpolate_only_missing_data=False, two_pass=True):
     extensions_raw = ['raw', 'raf', 'dng', 'nef', 'cr3', 'arw', 'cr2', 'cr3', 'orf', 'rw2']
     extensions_image = ['jpg', 'jpeg', 'tiff', 'tif', 'png']
 
@@ -1289,9 +1313,16 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
 
         print('Finished converting. Generating LUT.')
         # a halc clut is a cube with level**2 entries on each dimension
+        lut_alignment = None
+        if two_pass and do_alignment:
+            print('Estimating approximate first-pass LUT for alignment')
+            lut_alignment = estimate_lut(filepaths_images_converted, size, n_pixels_sample, is_grayscale, None,
+                                         False, False, interpolate_unreliable, False,
+                                         align_translation_only, sample_uniform, interpolate_only_missing_data)
+
         result = estimate_lut(filepaths_images_converted, size, n_pixels_sample, is_grayscale, dir_out_info,
                               make_interpolated_red, make_unchanged_red, interpolate_unreliable, do_alignment,
-                              align_translation_only, sample_uniform, interpolate_only_missing_data)
+                              align_translation_only, sample_uniform, interpolate_only_missing_data, lut_alignment)
 
         print(f'Writing result to {file_out}')
         write_cube(result, file_out)
@@ -1303,15 +1334,15 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
                 os.mkdir(path_dir_info_image)
             for path_reference, path_raw in tqdm(filepaths_images_converted):
                 raw = cv2.cvtColor(cv2.imread(path_raw, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
-                shutil.copyfile(
-                    path_reference,
-                    os.path.join(path_dir_info_image, os.path.basename(path_reference))
-                )
 
                 raw_transformed = apply_lut(raw, result)
                 cv2.imwrite(
                     os.path.join(path_dir_info_image, os.path.basename(path_raw)),
                     cv2.cvtColor(raw_transformed, cv2.COLOR_RGB2BGR)
+                )
+                cv2.imwrite(
+                    os.path.join(path_dir_info_image, os.path.basename(path_reference)),
+                    cv2.imread(path_reference, cv2.IMREAD_UNCHANGED)
                 )
 
     return result

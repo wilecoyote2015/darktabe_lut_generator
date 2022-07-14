@@ -204,6 +204,15 @@ def main():
              'If you like to contribute, you are welcome!'
     )
     parser.set_defaults(interpolate_only_missing_data=False)
+    parser.add_argument(
+        '--single_pass',
+        action='store_true',
+        help='By default, two passes of LUT estimation are performed if --disable_image_alignment is not set: '
+             'First, a rough estimate ot LUT is calculated without alignment. Then, this LUT is used to transform the '
+             'RAW image\'s colors for better alignment of the final pass. This is motivated by the problem that'
+             ' the different color rendition of RAW and OOC images make proper alignment difficult.'
+    )
+    parser.set_defaults(single_pass=False)
 
     args = parser.parse_args()
 
@@ -227,7 +236,8 @@ def main():
         not args.disable_image_alignment,
         args.align_translation_only,
         args.sample_uniform,
-        args.interpolate_only_missing_data
+        args.interpolate_only_missing_data,
+        not args.single_pass
     )
 
 
