@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="darktable-lut-generator",
-    version="0.0.13",
+    version="0.0.14",
     author="Björn Sonnenschein",
     author_email="wilecoyote2015@gmail.com",
     description="Estimate a .cube 3D lookup table from camera images for the Darktable lut 3D module.",
