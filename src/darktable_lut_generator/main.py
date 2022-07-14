@@ -60,7 +60,8 @@ def main():
         default=100000,
         help='Number of pixels to sample from the images for LUT estimation. '
              'Higher values may produce more accurate results, but are slower and more memory intensive. '
-             'The default value works well. Try 10000 if running out of memory. '
+             'The default value works well. Try 10000 if running out of memory. Values over 500000 usually provide no '
+             'significant benefit, but this depends on the images and the lut size'
              'Set to 0 to use all pixels (recommended with resize)'
     )
     parser.add_argument(
@@ -74,8 +75,9 @@ def main():
     parser.add_argument(
         '--resize',
         type=int,
-        default=0,
-        help='If provided, the input images are resized to this maximum border length.'
+        default=1000,
+        help='If provided, the input images are resized to this maximum border length. If 0, images are not resized, which'
+             ' may result in long alignment runtimes.'
     )
     parser.add_argument(
         '--is_grayscale',
@@ -87,7 +89,8 @@ def main():
     parser.add_argument(
         '--sample_uniform',
         action='store_true',
-        help='Try to sample the pixels uniformly over the color space.'
+        help='Try to sample the pixels uniformly over the color space. This may help if particular colors are represented'
+             ' by only small regions in the sample images.'
     )
     parser.set_defaults(sample_uniform=False)
 
