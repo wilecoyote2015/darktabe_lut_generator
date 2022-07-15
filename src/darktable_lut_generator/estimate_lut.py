@@ -19,6 +19,7 @@ import shutil
 from scipy.optimize import linprog
 from scipy import sparse
 
+from scipy.interpolate import RegularGridInterpolator
 from plotly.subplots import make_subplots
 import numpy as np
 import cv2
@@ -200,7 +201,7 @@ def get_aligned_image_pair(path_reference, path_raw, do_alignment, translation_o
             raw_use = raw
         else:
             print('Applying estimated LUT to alignment raw image')
-            raw_use = apply_lut(raw, lut_alignment)
+            raw_use = apply_lut_scipy(raw, lut_alignment)
         print(f'aligning image {path_reference}')
         reference_aligned, mask = align_images_ecc(
             reference,
@@ -440,6 +441,29 @@ def apply_lut(image, lut):
 
     return result.astype(image.dtype)
 
+
+def apply_lut_scipy(image, lut):
+    size = lut.shape[0]
+    coordinates = np.linspace(0, 1, size)
+    result = np.zeros_like(image, dtype=np.float64)
+
+    max_value = get_max_value(image)
+    image_normed = image.astype(np.float64) / max_value
+
+    for idx_channel in range(lut.shape[-1]):
+        interpolator = RegularGridInterpolator(
+            (coordinates, coordinates, coordinates),
+            lut[..., idx_channel]
+        )
+        pixels = np.reshape(image_normed, (image_normed[..., 0].size, image_normed.shape[-1]))
+        pixels_transformed = interpolator(
+            pixels
+        )
+        result[..., idx_channel] = np.reshape(pixels_transformed, image_normed.shape[:-1])
+
+    result *= max_value
+
+    return result.astype(image.dtype)
 
 def apply_lut_pixel(lut, weights_distances_channels_pixel):
     # result = np.zeros(weights_distances_channels_pixel.shape[:-1], np.float)
@@ -1351,7 +1375,7 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
             for path_reference, path_raw in tqdm(filepaths_images_converted):
                 raw = cv2.cvtColor(cv2.imread(path_raw, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
 
-                raw_transformed = apply_lut(raw, result)
+                raw_transformed = apply_lut_scipy(raw, result)
                 cv2.imwrite(
                     os.path.join(path_dir_info_image, os.path.basename(path_raw)),
                     cv2.cvtColor(raw_transformed, cv2.COLOR_RGB2BGR)
