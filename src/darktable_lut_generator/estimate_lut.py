@@ -360,7 +360,7 @@ def sample_indices_pixels(pixels, n_samples, uniform=False, size_batch_uniform=1
 
 
 def get_pixels_sample_image_pair(path_reference, path_raw, n_samples, dir_out_info, do_alignment, sample_uniform,
-                                 align_translation_only, lut_alignment):
+                                 align_translation_only, lut_alignment, dtype=np.float64):
     reference, raw, mask = get_aligned_image_pair(path_reference, path_raw, do_alignment, align_translation_only,
                                                   dir_out_info, lut_alignment)
     max_value = get_max_value(reference)
@@ -381,8 +381,8 @@ def get_pixels_sample_image_pair(path_reference, path_raw, n_samples, dir_out_in
     )[np.reshape(mask, mask.shape[0] * mask.shape[1])]
 
     indices_sample = sample_indices_pixels(pixels_raw, n_samples, uniform=sample_uniform)
-    result_raw = pixels_raw[indices_sample].astype(np.float32) / max_value
-    result_reference = pixels_reference[indices_sample].astype(np.float32) / max_value
+    result_raw = pixels_raw[indices_sample].astype(dtype) / max_value
+    result_reference = pixels_reference[indices_sample].astype(dtype) / max_value
 
     return result_reference, result_raw, max_value
 
@@ -404,7 +404,7 @@ def get_pixels_sample_image_pair(path_reference, path_raw, n_samples, dir_out_in
 #     return weights_distances_channels
 
 def make_weights_distances_lut_entries_channels(pixels, size):
-    """ Get trilinear interpolation weights for LUT entries for each piel coordinate of the lut for one color axis.
+    """ Get trilinear interpolation weights for LUT entries for each pixel coordinate of the lut for one color axis.
     """
     coordinates = np.linspace(0, 1, size)
     step_size = 1. / (size - 1)
@@ -459,7 +459,7 @@ def apply_lut_pixel(lut, weights_distances_channels_pixel):
 def make_design_matrix(pixels_references, pixels_raws, size):
     # feature matrix with order of permutation: r, g, b
     print('generating design matrix')
-    design_matrix = np.zeros((pixels_references.shape[0], size * size * size), np.float32)
+    design_matrix = np.zeros((pixels_references.shape[0], size * size * size), pixels_references.dtype)
 
     weights_distances_channels = make_weights_distances_lut_entries_channels(pixels_raws, size)
 
