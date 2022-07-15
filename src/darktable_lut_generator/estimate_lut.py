@@ -196,10 +196,15 @@ def get_aligned_image_pair(path_reference, path_raw, do_alignment, translation_o
 
     if do_alignment:
         # align the images
+        if lut_alignment is None:
+            raw_use = raw
+        else:
+            print('Applying estimated LUT to alignment raw image')
+            raw_use = apply_lut(raw, lut_alignment)
         print(f'aligning image {path_reference}')
         reference_aligned, mask = align_images_ecc(
             reference,
-            apply_lut(raw, lut_alignment) if lut_alignment is not None else raw,
+            raw_use,
             translation_only=translation_only,
             dir_out_info=dir_out_info,
             name_1=os.path.basename(path_reference),
