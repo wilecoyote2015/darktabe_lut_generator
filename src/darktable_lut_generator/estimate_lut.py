@@ -34,6 +34,7 @@ from importlib.resources import path
 from scipy.spatial import KDTree
 from scipy.optimize import lsq_linear
 from scipy import ndimage
+import time
 
 
 
@@ -1026,16 +1027,24 @@ def fit_channel_constrained(design_matrix, differences_references_raw_channel, i
     design_matrix_scaled = design_matrix / stds[np.newaxis, ...]
 
     bounds_lower = (-1 * identity[..., idx_channel].reshape([size ** 3]))
-    bounds_lower_scaled = bounds_lower * stds
+    # bounds_lower_scaled = bounds_lower * stds
     bounds_upper = (1. - identity[..., idx_channel]).reshape([size ** 3])
-    bounds_upper_scaled = bounds_upper * stds
+    # bounds_upper_scaled = bounds_upper * stds
 
     # regression = LinearRegression(fit_intercept=False)
-    result_opt = lsq_linear(design_matrix_scaled, differences_references_raw_channel,
-                            (bounds_lower_scaled, bounds_upper_scaled),
-                            method='bvls'
-                            )
-    coeffs_rescaled = result_opt.x / stds
+    t1 = time.time()
+    # result_opt = lsq_linear(design_matrix_scaled, differences_references_raw_channel,
+    #                         (bounds_lower_scaled, bounds_upper_scaled)
+    #                         )
+    result_opt = lsq_linear(
+        design_matrix,
+        differences_references_raw_channel,
+        (bounds_lower, bounds_upper)
+    )
+    # coeffs_rescaled = result_opt.x / stds
+    coeffs_rescaled = result_opt.x
+    t2 = time.time()
+    print(f'Fitted in {t2 - t1} seconds.')
 
     return coeffs_rescaled
 
