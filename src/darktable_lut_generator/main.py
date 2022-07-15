@@ -77,7 +77,7 @@ def main():
         type=int,
         default=1000,
         help='If provided, the input images are resized to this maximum border length. If 0, images are not resized, which'
-             ' may result in long alignment runtimes.'
+             ' may result in long alignment runtimes, but better LUT quality.'
     )
     parser.add_argument(
         '--is_grayscale',
