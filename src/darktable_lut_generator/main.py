@@ -106,15 +106,17 @@ def main():
     )
     parser.set_defaults(use_lens_correction=False)
     parser.add_argument(
-        '--disable_image_alignment',
-        action='store_true',
-        help='This flag disables the image alignment and just crops the raw image.'
+        '--n_passes_alignment',
+        type=int,
+        default=2,
+        help='Set the number of image alignment passes. If 0, no alignment is performed and the image pairs are just cropped to same size. '
+             'Values greater than 1 use passes of pre-alignment (see below). '
              'Often, developed raws and OOC images do not overlap'
              ' perfectly. One may assume that the developed Raw has the same amount of additional'
              '  pixels on each side and is otherwise geometrically identical to the OOC image.'
-             'Then, the developed raw can simply be cropped accordingly. '
+             'Then, the developed raw can simply be cropped accordingly. \n'
              'The assumption does not hold in many real-world cases, though. In particular, in-camera lens correction'
-             ' may distort the image.'
+             ' may distort the image. \n \n'
              ' A simple image alignment procedure is used'
              ' to align the images and compensate for some distortions by default. '
              'Alignment is tricky, especially as OOC and RAW images usually exhibit different gradiation. '
@@ -122,10 +124,13 @@ def main():
              'not necessarily provided with alignment. Hence, it is important to check the alignment results.'
              'Use the --path_dir_out_info to inspect'
              ' the generated images and assess whether alignment is necessary and if it works.'
-             'Generally, the best results are achieved by disabling in camera lens correction and hence . Then,'
-             ' image alignment can also be disabled in most cases.'
+             'Generally, the best results are achieved by disabling in camera lens correction. \n \n'
+             'By default, two passes of LUT estimation are performed:'
+             'First, a rough estimate ot LUT is calculated without alignment. Then, this LUT is used to transform the '
+             'RAW image\'s colors for better alignment of the final pass. This is motivated by the problem that'
+             ' the different color rendition of RAW and OOC images make proper alignment difficult.'
+             'If the first LUT estimate is not good enough, try 3 passes.'
     )
-    parser.set_defaults(disable_image_alignment=False)
     parser.add_argument(
         '--align_translation_only',
         action='store_true',
@@ -236,11 +241,10 @@ def main():
         not args.no_interpolation_unreliable,
         args.use_lens_correction,
         args.legacy_color,
-        not args.disable_image_alignment,
+        args.n_passes_alignment,
         args.align_translation_only,
         args.sample_uniform,
         args.interpolate_only_missing_data,
-        not args.single_pass
     )
 
 

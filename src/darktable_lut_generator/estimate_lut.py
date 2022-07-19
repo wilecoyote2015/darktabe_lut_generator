@@ -1209,9 +1209,9 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
          path_dt_exec=None,
          path_style_image_user=None, path_style_raw_user=None, path_dir_intermediate=None, dir_out_info=None,
          make_interpolated_red=False, make_unchanged_red=False, interpolate_unreliable=True,
-         use_lens_correction=True, legacy_color=False, do_alignment=True,
+         use_lens_correction=True, legacy_color=False, n_passes_alignment=1,
          align_translation_only=False,
-         sample_uniform=False, interpolate_only_missing_data=False, two_pass=True):
+         sample_uniform=False, interpolate_only_missing_data=False):
     extensions_raw = ['raw', 'raf', 'dng', 'nef', 'cr3', 'arw', 'cr2', 'cr3', 'orf', 'rw2']
     extensions_image = ['jpg', 'jpeg', 'tiff', 'tif', 'png']
 
@@ -1354,14 +1354,18 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
         print('Finished converting. Generating LUT.')
         # a halc clut is a cube with level**2 entries on each dimension
         lut_alignment = None
-        if two_pass and do_alignment:
-            print('Estimating approximate first-pass LUT for alignment')
-            lut_alignment = estimate_lut(filepaths_images_converted, size, n_pixels_sample, is_grayscale, None,
-                                         False, False, interpolate_unreliable, False,
-                                         align_translation_only, sample_uniform, interpolate_only_missing_data)
+
+        if n_passes_alignment > 1:
+            for idx_pass in range(n_passes_alignment - 1):
+                print(
+                    f'Estimating approximate first-pass LUT for alignment: Pass {idx_pass + 1} of {n_passes_alignment - 1}')
+                lut_alignment = estimate_lut(filepaths_images_converted, size, n_pixels_sample, is_grayscale, None,
+                                             False, False, interpolate_unreliable, lut_alignment is not None,
+                                             align_translation_only, sample_uniform, interpolate_only_missing_data,
+                                             lut_alignment)
 
         result = estimate_lut(filepaths_images_converted, size, n_pixels_sample, is_grayscale, dir_out_info,
-                              make_interpolated_red, make_unchanged_red, interpolate_unreliable, do_alignment,
+                              make_interpolated_red, make_unchanged_red, interpolate_unreliable, n_passes_alignment > 0,
                               align_translation_only, sample_uniform, interpolate_only_missing_data, lut_alignment)
 
         print(f'Writing result to {file_out}')
