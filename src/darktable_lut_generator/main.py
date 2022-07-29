@@ -183,7 +183,7 @@ def main():
         '--make_interpolated_estimates_red',
         action='store_true',
         help='In the resulting LUT, make estimates of colors that were interpolated due to unreliably few datapoints red. '
-             'Only applies if --no_interpolation_unreliable is not set. Useful for debugging and identifying sparsely sampled colors.'
+             'Only applies if --no_interpolation_unsampled_colors is not set. Useful for debugging and identifying sparsely sampled colors.'
     )
     parser.set_defaults(make_interpolated_estimates_red=False)
     parser.add_argument(
@@ -193,17 +193,22 @@ def main():
     )
     parser.set_defaults(make_unchanged_red=False)
     parser.add_argument(
-        '--no_interpolation_unreliable',
+        '--no_interpolation_unsampled_colors',
         action='store_true',
-        help='By default, estimates for colors with unreliably few samples are interpolated. This flag disables the interpolation, which may lead to wrong colors that are not covered well by the sample images..'
+        help='By default, estimates for colors without or with only unreliably few samples (depending on'
+             '--interpolate_unreliable_colors) are interpolated with neighboring colors. '
+             'This flag disables the interpolation, which may lead to wrong colors that are not covered well by the sample images..'
     )
-    parser.set_defaults(no_interpolation_unreliable=False)
+    parser.set_defaults(no_interpolation_unsampled_colors=False)
     parser.add_argument(
-        '--interpolate_only_missing_data',
+        '--interpolate_unreliable_colors',
         action='store_true',
-        help='By default, estimates for colors with unreliably few samples are interpolated. '
-             'If this flag is active and --no_interpolation_unreliable is NOT set, only colors with '
-             'no samples are considered unreliable. '
+        help='By default, estimates for colors with no samples are interpolated. '
+             'If this flag is active and --no_interpolation_unsampled_colors is NOT set '
+             '(otherwise there is no interpolation at all), colors with '
+             'only a few samples are considered unreliable in contrast to only considering colors with no samples unreliable. '
+             'This may improve stability if there are some colors'
+             ' represented by very few pixels.'
              'TODO: Do some statistical inference to determine reliability of estimated parameters for more '
              'sophisticated decision which colors to interpolate. But note that constrained optimization is used, '
              'so that the statistical assumptions for OLS standard errors do not apply. In the one hand, '
@@ -211,7 +216,7 @@ def main():
              'intuitively. In the other hand, a simple approach might work well enough in practice. '
              'If you like to contribute, you are welcome!'
     )
-    parser.set_defaults(interpolate_only_missing_data=False)
+    parser.set_defaults(interpolate_unreliable_colors=False)
     parser.add_argument(
         '--single_pass',
         action='store_true',
@@ -238,13 +243,13 @@ def main():
         args.path_dir_out_info,
         args.make_interpolated_estimates_red,
         args.make_unchanged_red,
-        not args.no_interpolation_unreliable,
+        not args.no_interpolation_unsampled_colors,
         args.use_lens_correction,
         args.legacy_color,
         args.n_passes_alignment,
         args.align_translation_only,
         args.sample_uniform,
-        args.interpolate_only_missing_data,
+        not args.interpolate_unreliable_colors,
     )
 
 
