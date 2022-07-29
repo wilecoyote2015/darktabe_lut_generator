@@ -32,16 +32,15 @@ Hence, it is advisable to also shoot the in-camera jpegs in Adobe RGB in order t
 In default configuration, Darktable may apply an exposure module with camera exposure bias correction automatically
 to raw files. The LUTs produced by this module are constructed to resemble the OOC jpeg when used on a raw
 image *without* the exposure bias correction. Also, the *filmic rgb* module should be turned off.
-Also, the lens correction module is activated by default, which can make a huge impact depending on camera/lens
-combination.
-The lens correction module should hence be activated when using the LUT.
-Lens correction can be deactivated during estimation with the according flag.
+Another issue is in-camera lens correction. By default, this script does not use darktable's lens-correction module. 
+If possible, the images should be taken without any in-camera lens correction. 
+If this is not possible (e.g. because in-camera lens correction cannot be disabled on the used camera), see `darktable_lut_generator --help` for the appropriate option to enable darktable's lens correction.
 
 The command
 ```darktable_lut_generate_pattern [path to output image]```
 may be used to generate a simple test pattern. If the pattern is displayed on a wide-gamut screen
 (an OLED smartphone with vidid color settings is fine), approx. 5 RAW+JPEG pairs can be photographed at different
-exposures. That may provide a good starting sample set, but additional real-world images are always
+exposures. That may provide a good starting sample set and is often sufficient for good results, but additional real-world images are always
 helpful.
 When applying the resulting LUT to the RAWs with those test images, there will still be some artifacts near the gamut
 limits.
@@ -59,10 +58,8 @@ and visualizations of the generated LUT. **TODO: documentation of outputs**
 
 # Estimation
 
-Estimation is performed by estimating the differences to an identity LUT using linear regression with LASSO
-regularization, assuming trilinear interpolation when applying the LUT.
-Very sparsely or non-sampled colors will fallback to identity. However, no sophisticated hyperparameter tuning regarding
-the LASSO parameter has been conducted, especially regarding different cube size.
+Estimation is performed by estimating the differences to an identity LUT using linear regression with an appropriately constrained parameter space, assuming trilinear interpolation when applying the LUT.
+Very sparsely or non-sampled colors will be interpolated with neighboring colors. However, no sophisticated hyperparameter tuning has been conducted in order to identify sparsely sampled patches, especially regarding different cube size.
 `n_samples` pixels are sampled from the image, as using all pixels is computationally expensive.
 Sampling is performed weighted by the inverse estimated sample density conditioned on the raw pixel colors in order to
 obtain a sample with approximately uniform distribution over the represented colors.
