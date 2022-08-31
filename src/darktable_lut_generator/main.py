@@ -142,6 +142,12 @@ def main():
         action='store_true',
         help='Use legacy color adaption for raw development'
     )
+    parser.add_argument(
+        '--interpolation',
+        type=str,
+        default='trilinear',
+        help='LUT interpolation. Either trilinear or tetrahedral.'
+    )
     parser.set_defaults(legacy_color=False)
     parser.add_argument(
         '--path_dt_cli',
@@ -250,6 +256,7 @@ def main():
         args.align_translation_only,
         args.sample_uniform,
         not args.interpolate_unreliable_colors,
+        args.interpolation
     )
 
 

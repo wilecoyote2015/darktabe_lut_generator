@@ -16,8 +16,13 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 import shutil
+
+import colour
 from scipy.optimize import linprog
 from scipy import sparse
+# import tensorflow as tf
+
+from colour import LUT3D
 
 from scipy.interpolate import RegularGridInterpolator
 from plotly.subplots import make_subplots
@@ -37,6 +42,10 @@ from scipy.optimize import lsq_linear
 from scipy import ndimage
 import time
 
+INTERPOLATORS = {
+    'trilinear': colour.algebra.table_interpolation_trilinear,
+    'tetrahedral': colour.algebra.table_interpolation_tetrahedral,
+}
 
 
 # FIXME: Something is wron with the export from darktable via command line:
@@ -185,7 +194,7 @@ def get_max_value(image: np.ndarray):
         raise NotImplementedError
 
 
-def get_aligned_image_pair(path_reference, path_raw, do_alignment, translation_only, dir_out_info=None,
+def get_aligned_image_pair(path_reference, path_raw, do_alignment, translation_only, interpolation, dir_out_info=None,
                            lut_alignment=None):
     reference = cv2.cvtColor(cv2.imread(path_reference, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
     raw = cv2.cvtColor(cv2.imread(path_raw, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
@@ -201,7 +210,7 @@ def get_aligned_image_pair(path_reference, path_raw, do_alignment, translation_o
             raw_use = raw
         else:
             print('Applying estimated LUT to alignment raw image')
-            raw_use = apply_lut_scipy(raw, lut_alignment)
+            raw_use = apply_lut_colour(raw, lut_alignment, interpolation)
         print(f'aligning image {path_reference}')
         reference_aligned, mask = align_images_ecc(
             reference,
@@ -264,7 +273,7 @@ def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grays
                  make_interpolated_red, make_unchanged_red, interpolate_unreliable, do_alignment,
                  align_translation_only,
                  sample_uniform,
-                 interpolate_only_missing_data, lut_alignment=None) -> np.ndarray:
+                 interpolate_only_missing_data, interpolation, lut_alignment=None) -> np.ndarray:
     """
     :param filepaths_images: paths of image pairs: [reference, vanilla raw development]
     :return:
@@ -282,7 +291,8 @@ def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grays
                 do_alignment,
                 sample_uniform,
                 align_translation_only,
-                lut_alignment
+                lut_alignment,
+                interpolation
             )
         except Exception as e:
             print(f'Image Alignment failed for images {os.path.basename(path_reference)}, {os.path.basename(path_raw)}.'
@@ -295,9 +305,10 @@ def estimate_lut(filepaths_images: [[str, str]], size, n_pixels_sample, is_grays
     pixels_raws = np.concatenate(pixels_raws, axis=0)
     pixels_references = np.concatenate(pixels_references, axis=0)
 
-    lut_result_normed = perform_estimation(pixels_references, pixels_raws, size, is_grayscale, dir_out_info,
+    lut_result_normed = perform_estimation(pixels_references, pixels_raws, size, is_grayscale, interpolation,
+                                           dir_out_info,
                                            make_interpolated_red, make_unchanged_red, interpolate_unreliable,
-                                           interpolate_only_missing_data)
+                                           interpolate_only_missing_data, lut_alignment)
 
     return lut_result_normed
 
@@ -361,9 +372,9 @@ def sample_indices_pixels(pixels, n_samples, uniform=False, size_batch_uniform=1
 
 
 def get_pixels_sample_image_pair(path_reference, path_raw, n_samples, dir_out_info, do_alignment, sample_uniform,
-                                 align_translation_only, lut_alignment, dtype=np.float64):
+                                 align_translation_only, lut_alignment, interpolation, dtype=np.float64):
     reference, raw, mask = get_aligned_image_pair(path_reference, path_raw, do_alignment, align_translation_only,
-                                                  dir_out_info, lut_alignment)
+                                                  dir_out_info, lut_alignment, interpolation)
     max_value = get_max_value(reference)
 
     pixels_reference = np.reshape(
@@ -420,50 +431,64 @@ def make_weights_distances_lut_entries_channels(pixels, size):
 
     return weights_distances_channels
 
-def apply_lut(image, lut):
+
+# def apply_lut(image, lut):
+#     size = lut.shape[0]
+#
+#     max_value = get_max_value(image)
+#     image_normed = image.astype(np.float64) / max_value
+#     weights_distances_channels = make_weights_distances_lut_entries_channels(image_normed, size)
+#
+#     result = np.zeros_like(image_normed)
+#     # TODO: speed up while still balancing memory usage
+#     # result = apply_lut_pixel(lut, weights_distances_channels)
+#     # traverse slices instead of interpolating whole image for memory usage limitation
+#     for idx_y in range(image_normed.shape[0]):
+#         result[idx_y] = apply_lut_pixel(
+#             lut,
+#             weights_distances_channels[idx_y]
+#         )
+#
+#     result *= max_value
+#
+#     return result.astype(image.dtype)
+
+def apply_lut_colour(image, lut, interpolation):
     size = lut.shape[0]
+    lut_3d = LUT3D(table=lut, size=size)
 
     max_value = get_max_value(image)
     image_normed = image.astype(np.float64) / max_value
-    weights_distances_channels = make_weights_distances_lut_entries_channels(image_normed, size)
 
-    result = np.zeros_like(image_normed)
-    # TODO: speed up while still balancing memory usage
-    # result = apply_lut_pixel(lut, weights_distances_channels)
-    # traverse slices instead of interpolating whole image for memory usage limitation
-    for idx_y in range(image_normed.shape[0]):
-        result[idx_y] = apply_lut_pixel(
-            lut,
-            weights_distances_channels[idx_y]
-        )
-
+    result = lut_3d.apply(image_normed, interpolator=INTERPOLATORS[interpolation])
     result *= max_value
 
     return result.astype(image.dtype)
 
 
-def apply_lut_scipy(image, lut):
-    size = lut.shape[0]
-    coordinates = np.linspace(0, 1, size)
-    result = np.zeros_like(image, dtype=np.float64)
-
-    max_value = get_max_value(image)
-    image_normed = image.astype(np.float64) / max_value
-
-    for idx_channel in range(lut.shape[-1]):
-        interpolator = RegularGridInterpolator(
-            (coordinates, coordinates, coordinates),
-            lut[..., idx_channel]
-        )
-        pixels = np.reshape(image_normed, (image_normed[..., 0].size, image_normed.shape[-1]))
-        pixels_transformed = interpolator(
-            pixels
-        )
-        result[..., idx_channel] = np.reshape(pixels_transformed, image_normed.shape[:-1])
-
-    result *= max_value
-
-    return result.astype(image.dtype)
+#
+# def apply_lut_scipy(image, lut):
+#     size = lut.shape[0]
+#     coordinates = np.linspace(0, 1, size)
+#     result = np.zeros_like(image, dtype=np.float64)
+#
+#     max_value = get_max_value(image)
+#     image_normed = image.astype(np.float64) / max_value
+#
+#     for idx_channel in range(lut.shape[-1]):
+#         interpolator = RegularGridInterpolator(
+#             (coordinates, coordinates, coordinates),
+#             lut[..., idx_channel]
+#         )
+#         pixels = np.reshape(image_normed, (image_normed[..., 0].size, image_normed.shape[-1]))
+#         pixels_transformed = interpolator(
+#             pixels
+#         )
+#         result[..., idx_channel] = np.reshape(pixels_transformed, image_normed.shape[:-1])
+#
+#     result *= max_value
+#
+#     return result.astype(image.dtype)
 
 def apply_lut_pixel(lut, weights_distances_channels_pixel):
     # result = np.zeros(weights_distances_channels_pixel.shape[:-1], np.float)
@@ -482,25 +507,38 @@ def apply_lut_pixel(lut, weights_distances_channels_pixel):
     return result
 
 
-def make_design_matrix(pixels_references, pixels_raws, size):
+def make_design_matrix(pixels_references, pixels_raws, size, interpolation):
+    if interpolation not in INTERPOLATORS:
+        raise ValueError(f'Interpolation {interpolation} not supported.')
     # feature matrix with order of permutation: r, g, b
     print('generating design matrix')
     design_matrix = np.zeros((pixels_references.shape[0], size * size * size), pixels_references.dtype)
+    # design_matrix_new = np.zeros((pixels_references.shape[0], size * size * size), pixels_references.dtype)
 
     weights_distances_channels = make_weights_distances_lut_entries_channels(pixels_raws, size)
+
+    lut = LUT3D(table=np.zeros((size, size, size, 3), dtype=pixels_raws.dtype), size=size)
 
     idx_design_matrix = 0
     for idx_r in tqdm(range(size)):
         for idx_g in range(size):
             for idx_b in range(size):
-                # for each pixel, get the distance to the current lut grid point.
-                # from this, the weight of this point is calculated.
-                weights_entry_lut = (
-                        weights_distances_channels[..., 0, idx_r]
-                        * weights_distances_channels[..., 1, idx_g]
-                        * weights_distances_channels[..., 2, idx_b]
-                )
-                design_matrix[..., idx_design_matrix] = weights_entry_lut
+                if interpolation == 'linear':
+                    # for each pixel, get the distance to the current lut grid point.
+                    # from this, the weight of this point is calculated.
+                    weights_entry_lut = (
+                            weights_distances_channels[..., 0, idx_r]
+                            * weights_distances_channels[..., 1, idx_g]
+                            * weights_distances_channels[..., 2, idx_b]
+                    )
+                    design_matrix[..., idx_design_matrix] = weights_entry_lut
+                else:
+                    lut.table[idx_r, idx_g, idx_b] = 1.
+                    design_matrix[..., idx_design_matrix] = lut.apply(
+                        pixels_raws,
+                        interpolator=INTERPOLATORS[interpolation]
+                    )[..., 0]
+                    lut.table[idx_r, idx_g, idx_b] = 0.
                 idx_design_matrix += 1
 
     return design_matrix
@@ -1050,12 +1088,101 @@ def fit_channel_constrained_abs_dev(design_matrix, differences_references_raw_ch
     return coeffs_rescaled
 
 
+#
+# def fit_channel_tf(design_matrix, differences_references_raw_channel, idx_channel, size, lut_start=None):
+#     stds = np.std(design_matrix, axis=0)
+#     stds[stds == 0] = 1.
+#     identity = make_lut_identity_normed(size, dtype=design_matrix.dtype)
+#
+#     # design_matrix_scaled = design_matrix / stds[np.newaxis, ...]
+#
+#     bounds_lower = (-1 * identity[..., idx_channel].reshape([size ** 3]))
+#     # bounds_lower_scaled = bounds_lower * stds
+#     bounds_upper = (1. - identity[..., idx_channel]).reshape([size ** 3])
+#     # bounds_upper_scaled = bounds_upper * stds
+#
+#     design_matrix_sparse = tf.sparse.from_dense(design_matrix)
+#
+#     # def softclip(x, low, high):
+#     #     return -tf.math.softplus(
+#     #         high - low - tf.math.softplus(x - low)
+#     #     ) * (high - low) / (
+#     #         tf.math.softplus(high - low)
+#     #     ) + high
+#
+#     def softclip(x, low, high):
+#         return tf.clip_by_value(x, low, high)
+#
+#     def optimize():
+#         differences_references_raw_channel_tf = tf.constant(differences_references_raw_channel)
+#         optimizer = tf.keras.optimizers.Adam(learning_rate=0.001, amsgrad=True)
+#         # optimizer = tf.keras.optimizers.SGD(
+#         #     learning_rate=1,
+#         #     momentum=0.,
+#         #     nesterov=True,
+#         # )
+#         # optimizer = tf.keras.optimizers.experimental.Adamax(
+#         #     learning_rate=0.001,
+#         #     # momentum=0.5,
+#         #     # nesterov=True,
+#         # )
+#         params = tf.Variable(
+#             tf.zeros_like(design_matrix[0])
+#             if lut_start is None else
+#             tf.cast(
+#                 lut_start[..., idx_channel].reshape([size**3])
+#                 - identity[..., idx_channel].reshape([size ** 3])
+#                 , design_matrix.dtype
+#             )
+#         )
+#
+#         def loss(params_, iter):
+#             # transformed = tf.linalg.matmul(
+#             #     design_matrix,
+#             #     softclip(params_, bounds_lower, bounds_upper)[:, tf.newaxis],
+#             #     a_is_sparse=True
+#             # )[:, 0]
+#
+#             transformed = tf.sparse.sparse_dense_matmul(
+#                 design_matrix_sparse,
+#                 softclip(params_, bounds_lower, bounds_upper)[:, tf.newaxis],
+#                 # a_is_sparse=True
+#             )[:, 0]
+#
+#             loss = tf.reduce_mean(tf.abs(differences_references_raw_channel_tf - transformed))
+#             tf.print('iter', iter, 'loss:', loss)
+#
+#             return loss
+#
+#         @tf.function(experimental_follow_type_hints=True)
+#         def train_step(iter: tf.Tensor):
+#             with tf.GradientTape() as tape:
+#                 loss_value = loss(params, iter)
+#             grads = tape.gradient(loss_value, [params])
+#             optimizer.apply_gradients(zip(grads, [params]))
+#             return loss_value
+#
+#         tf.map_fn(
+#             train_step,
+#             tf.range(3000),
+#             fn_output_signature=design_matrix.dtype
+#         )
+#
+#         return softclip(params, bounds_lower, bounds_upper)
+#
+#
+#
+#     coeffs_rescaled = optimize()
+#     t2 = time.time()
+#
+#     return coeffs_rescaled
+
 def fit_channel_constrained(design_matrix, differences_references_raw_channel, idx_channel, size):
     stds = np.std(design_matrix, axis=0)
     stds[stds == 0] = 1.
     identity = make_lut_identity_normed(size, dtype=design_matrix.dtype)
 
-    design_matrix_scaled = design_matrix / stds[np.newaxis, ...]
+    # design_matrix_scaled = design_matrix / stds[np.newaxis, ...]
 
     bounds_lower = (-1 * identity[..., idx_channel].reshape([size ** 3]))
     # bounds_lower_scaled = bounds_lower * stds
@@ -1098,10 +1225,10 @@ def fit_channel_lasso(design_matrix, differences_references_raw_channel, idx_cha
     return coeffs_rescaled
 
 
-def perform_estimation(pixels_references, pixels_raws, size, is_grayscale, dir_out_info=None,
+def perform_estimation(pixels_references, pixels_raws, size, is_grayscale, interpolation, dir_out_info=None,
                        make_interpolated_red=False, make_unchanged_red=False, interpolate_unreliable=True,
-                       interpolate_only_missing_data=False):
-    design_matrix = make_design_matrix(pixels_references, pixels_raws, size)
+                       interpolate_only_missing_data=False, lut_start=None):
+    design_matrix = make_design_matrix(pixels_references, pixels_raws, size, interpolation)
 
     print('fitting lookup table coefficients')
 
@@ -1122,10 +1249,12 @@ def perform_estimation(pixels_references, pixels_raws, size, is_grayscale, dir_o
 
         # coefficients = fit_channel_constrained_abs_dev(
         coefficients = fit_channel_constrained(
+            # coefficients = fit_channel_tf(
             design_matrix,
             differences_references_raw[..., idx_channel],
             idx_channel,
-            size
+            size,
+            # lut_start
         )
 
         residuals_channels.append(
@@ -1211,7 +1340,7 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
          make_interpolated_red=False, make_unchanged_red=False, interpolate_unreliable=True,
          use_lens_correction=True, legacy_color=False, n_passes_alignment=1,
          align_translation_only=False,
-         sample_uniform=False, interpolate_only_missing_data=False):
+         sample_uniform=False, interpolate_only_missing_data=False, interpolation='trilinear'):
     extensions_raw = ['raw', 'raf', 'dng', 'nef', 'cr3', 'arw', 'cr2', 'cr3', 'orf', 'rw2']
     extensions_image = ['jpg', 'jpeg', 'tiff', 'tif', 'png']
 
@@ -1362,11 +1491,12 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
                 lut_alignment = estimate_lut(filepaths_images_converted, size, n_pixels_sample, is_grayscale, None,
                                              False, False, interpolate_unreliable, lut_alignment is not None,
                                              align_translation_only, sample_uniform, interpolate_only_missing_data,
-                                             lut_alignment)
+                                             interpolation, lut_alignment)
 
         result = estimate_lut(filepaths_images_converted, size, n_pixels_sample, is_grayscale, dir_out_info,
                               make_interpolated_red, make_unchanged_red, interpolate_unreliable, n_passes_alignment > 0,
-                              align_translation_only, sample_uniform, interpolate_only_missing_data, lut_alignment)
+                              align_translation_only, sample_uniform, interpolate_only_missing_data, interpolation,
+                              lut_alignment)
 
         print(f'Writing result to {file_out}')
         write_cube(result, file_out)
@@ -1379,7 +1509,7 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
             for path_reference, path_raw in tqdm(filepaths_images_converted):
                 raw = cv2.cvtColor(cv2.imread(path_raw, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
 
-                raw_transformed = apply_lut_scipy(raw, result)
+                raw_transformed = apply_lut_colour(raw, result, interpolation)
                 cv2.imwrite(
                     os.path.join(path_dir_info_image, os.path.basename(path_raw)),
                     cv2.cvtColor(raw_transformed, cv2.COLOR_RGB2BGR)
