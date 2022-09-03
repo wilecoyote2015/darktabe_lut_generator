@@ -174,6 +174,16 @@ def main():
              'This can be used to use different color spaces, but no further changes should be made to the image.'
     )
     parser.add_argument(
+        '--paths_dirs_files_config_use',
+        type=str,
+        default=None,
+        help='By default, darktable is called with an empty config directory, in order to prevent user settings on the'
+             ' system from interfering with the LUT generation (e.g. by auto-applying presets). Here, a comma-separated'
+             ' list of file or directory paths that will be copied to the empty darktable config directory'
+             ' can be specified. A use case is if one wants to use raw presets with --path_style_raw that use'
+             ' a custom input or output color profile'
+    )
+    parser.add_argument(
         '--path_dir_intermediate',
         type=str,
         default=None,
@@ -247,7 +257,8 @@ def main():
         args.align_translation_only,
         args.sample_uniform,
         not args.interpolate_unreliable_colors,
-        args.interpolation
+        args.interpolation,
+        args.paths_dirs_files_config_use
     )
 
 

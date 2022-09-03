@@ -1340,7 +1340,8 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
          make_interpolated_red=False, make_unchanged_red=False, interpolate_unreliable=True,
          use_lens_correction=True, legacy_color=False, n_passes_alignment=1,
          align_translation_only=False,
-         sample_uniform=False, interpolate_only_missing_data=False, interpolation='trilinear'):
+         sample_uniform=False, interpolate_only_missing_data=False, interpolation='trilinear',
+         paths_dirs_files_config_use=None):
     extensions_raw = ['raw', 'raf', 'dng', 'nef', 'cr3', 'arw', 'cr2', 'cr3', 'orf', 'rw2']
     extensions_image = ['jpg', 'jpeg', 'tiff', 'tif', 'png']
 
@@ -1369,6 +1370,16 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
         path_styles_temp = os.path.join(path_dir_temp, 'styles')
         os.mkdir(path_styles_temp)
         print(path_dir_conf_temp)
+
+        # if supplied, fill conf dir with user data
+        if paths_dirs_files_config_use is not None:
+            paths_config = paths_dirs_files_config_use.split(',')
+            for path_ in paths_config:
+                path_ = os.path.normpath(path_)
+                if os.path.isfile(path_):
+                    shutil.copyfile(path_, path_dir_conf_temp)
+                else:
+                    shutil.copytree(path_, os.path.join(path_dir_conf_temp, os.path.basename(path_)))
 
         with path('darktable_lut_generator.styles', 'image.dtstyle') as path_style_image_default:
             path_style_image = path_style_image_user if path_style_image_user is not None else path_style_image_default
@@ -1429,7 +1440,7 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
                 'darktable-cli' if path_dt_exec is None else path_dt_exec,
                 path_in_image,
                 path_out_image,
-                '--style-overwrite',
+                # '--style-overwrite',
                 '--style',
                 get_name_style(path_style_image_temp),
                 *args_common,
@@ -1456,7 +1467,7 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
                 'darktable-cli' if path_dt_exec is None else path_dt_exec,
                 path_in_raw,
                 path_out_raw,
-                '--style-overwrite',
+                # '--style-overwrite',
                 '--style',
                 get_name_style(path_style_raw_temp),
                 *args_common,
