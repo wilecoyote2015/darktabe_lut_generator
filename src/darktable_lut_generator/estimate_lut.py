@@ -374,7 +374,7 @@ def sample_indices_pixels(pixels, n_samples, uniform=False, size_batch_uniform=1
 def get_pixels_sample_image_pair(path_reference, path_raw, n_samples, dir_out_info, do_alignment, sample_uniform,
                                  align_translation_only, lut_alignment, interpolation, dtype=np.float64):
     reference, raw, mask = get_aligned_image_pair(path_reference, path_raw, do_alignment, align_translation_only,
-                                                  dir_out_info, lut_alignment, interpolation)
+                                                  interpolation, dir_out_info, lut_alignment)
     max_value = get_max_value(reference)
 
     pixels_reference = np.reshape(
