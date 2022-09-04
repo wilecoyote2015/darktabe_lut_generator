@@ -216,6 +216,9 @@ def main():
              'This flag disables the interpolation, which may lead to wrong colors that are not covered well by the sample images..'
     )
     parser.set_defaults(no_interpolation_unsampled_colors=False)
+    parser.add_argument('--title', default=None, help='The LUT title to write to the .cube file in the TITLE field')
+    parser.add_argument('--comment', default=None,
+                        help='A comment that will be written in the header of the .cube file')
     parser.add_argument(
         '--interpolate_unreliable_colors',
         action='store_true',
@@ -258,7 +261,9 @@ def main():
         args.sample_uniform,
         not args.interpolate_unreliable_colors,
         args.interpolation,
-        args.paths_dirs_files_config_use
+        args.paths_dirs_files_config_use,
+        args.title,
+        args.comment
     )
 
 
