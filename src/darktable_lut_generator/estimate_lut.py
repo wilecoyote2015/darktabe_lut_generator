@@ -928,73 +928,6 @@ def constrained_quantile_regression(design_matrix, y, bounds_lower, bounds_upper
 
     return coefficients
 
-
-# def constrained_quantile_regression(design_matrix, y, bounds_lower, bounds_upper, quantile=0.5):
-#     # Simple linear programming implementation of constrained quantile regression
-#     #   adapted from h
-#     #   ttps://stats.stackexchange.com/questions/384909/formulating-quantile-regression-as-linear-programming-problem
-#
-#     K = design_matrix.shape[1]
-#     N = design_matrix.shape[0]
-#
-#     # equality constraints - left hand side
-#
-#     A1 = design_matrix  # intercepts & data points - positive weights
-#     A2 = design_matrix * - 1  # intercept & data points - negative weights
-#     A3 = np.identity(N)  # error - positive
-#     A4 = np.identity(N) * -1  # error - negative
-#
-#     A_eq = np.concatenate((A1, A2, A3, A4), axis=1)  # all the equality constraints
-#
-#     # equality constraints - right hand side
-#     b_eq = y
-#
-#     # goal function - intercept & data points have 0 weights
-#     # positive error has tau weight, negative error has 1-tau weight
-#     c = np.concatenate((np.repeat(0, 2 * K), quantile * np.repeat(1, N), (1 - quantile) * np.repeat(1, N)))
-#
-#     # all variables must be greater than zero
-#     # adding inequality constraints - left hand side
-#     n = A_eq.shape[-1]
-#     A_ub = np.full((n, n), 0.)
-#     A_ub[::n + 1] = -1.0
-#
-#     # adding inequality constraints - right hand side (all zeros)
-#     b_ub = np.full((n, 1), 0.)
-#
-#     # add parameter bounda
-#     for idx_parameter in range(K):
-#         bounds_left_upper_param = np.zeros((1, n))
-#         bounds_left_upper_param[0, [idx_parameter, idx_parameter + K]] = np.asarray([1, -1])
-#         bounds_right_upper_param = np.full((1, 1), bounds_upper[idx_parameter])
-#
-#         A_ub = np.concatenate([A_ub, bounds_left_upper_param], axis=0)
-#         b_ub = np.concatenate([b_ub, bounds_right_upper_param], axis=0)
-#
-#         bounds_left_lower_param = np.zeros((1, n))
-#         bounds_left_lower_param[0, [idx_parameter, idx_parameter + K]] = np.asarray([-1, 1])
-#         bounds_right_lower_param = np.full((1, 1), -bounds_lower[idx_parameter])
-#
-#         A_ub = np.concatenate([A_ub, bounds_left_lower_param], axis=0)
-#         b_ub = np.concatenate([b_ub, bounds_right_lower_param], axis=0)
-#
-#     sol = solvers.lp(
-#         c,
-#         A_eq,
-#         b_eq,
-#         A_ub,
-#         b_ub,
-#         solver='glpk'
-#     )
-#
-#     x = sol['X']
-#
-#     # both negative and positive components get values above zero, this gets fixed here
-#     coefficients = x[:K] - x[K:2 * K]
-#
-#     return coefficients
-
-
 def fit_channel_smoothness_penalty(design_matrix, differences_references_raw_channel, idx_channel, size):
     print(f'Fitting channel {idx_channel}')
     stds = np.std(design_matrix, axis=0)
@@ -1010,8 +943,6 @@ def fit_channel_smoothness_penalty(design_matrix, differences_references_raw_cha
 
     bounds_list = [(bounds_lower_scaled[idx], bounds_upper_scaled[idx]) for idx in range(size ** 3)]
 
-    # regression = LinearRegression(fit_intercept=False)
-
     def loss(coeffs):
         regularization_strength = 1e-5
         estimate = np.matmul(design_matrix_scaled, coeffs)
@@ -1023,9 +954,6 @@ def fit_channel_smoothness_penalty(design_matrix, differences_references_raw_cha
 
         result = mse + penalty * regularization_strength
 
-        # print(f'mse: {mse}, penalty term: {penalty * regularization_strength}, result: {result}')
-        # print(penalty)
-        # print(result)
 
         return result
 
@@ -1060,20 +988,7 @@ def fit_channel_constrained_abs_dev(design_matrix, differences_references_raw_ch
     bounds_upper = (1. - identity[..., idx_channel]).reshape([size ** 3])
     bounds_upper_scaled = bounds_upper * stds
 
-    # regression = LinearRegression(fit_intercept=False)
-    # print('Calculating OLS solution as start parameters')
-    # result_opt_ols = lsq_linear(design_matrix_scaled, differences_references_raw_channel)
     print('Calculating least absolute deviation solution')
-    # TODO: parameter bounds
-    #   https://stats.stackexchange.com/questions/384909/formulating-quantile-regression-as-linear-programming-problem
-    # regressor = QuantileRegressor(
-    #     quantile=0.5,
-    #     fit_intercept=False,
-    #     solver='highs',
-    #     alpha=0.,
-    #     # solver_options={'bounds': zip(bounds_lower_scaled, bounds_upper_scaled)}
-    #     # solver_options={'bounds': bounds}
-    # ).fit(design_matrix_scaled, differences_references_raw_channel)
 
     coeffs = constrained_quantile_regression(
         design_matrix_scaled,
@@ -1087,95 +1002,6 @@ def fit_channel_constrained_abs_dev(design_matrix, differences_references_raw_ch
 
     return coeffs_rescaled
 
-
-#
-# def fit_channel_tf(design_matrix, differences_references_raw_channel, idx_channel, size, lut_start=None):
-#     stds = np.std(design_matrix, axis=0)
-#     stds[stds == 0] = 1.
-#     identity = make_lut_identity_normed(size, dtype=design_matrix.dtype)
-#
-#     # design_matrix_scaled = design_matrix / stds[np.newaxis, ...]
-#
-#     bounds_lower = (-1 * identity[..., idx_channel].reshape([size ** 3]))
-#     # bounds_lower_scaled = bounds_lower * stds
-#     bounds_upper = (1. - identity[..., idx_channel]).reshape([size ** 3])
-#     # bounds_upper_scaled = bounds_upper * stds
-#
-#     design_matrix_sparse = tf.sparse.from_dense(design_matrix)
-#
-#     # def softclip(x, low, high):
-#     #     return -tf.math.softplus(
-#     #         high - low - tf.math.softplus(x - low)
-#     #     ) * (high - low) / (
-#     #         tf.math.softplus(high - low)
-#     #     ) + high
-#
-#     def softclip(x, low, high):
-#         return tf.clip_by_value(x, low, high)
-#
-#     def optimize():
-#         differences_references_raw_channel_tf = tf.constant(differences_references_raw_channel)
-#         optimizer = tf.keras.optimizers.Adam(learning_rate=0.001, amsgrad=True)
-#         # optimizer = tf.keras.optimizers.SGD(
-#         #     learning_rate=1,
-#         #     momentum=0.,
-#         #     nesterov=True,
-#         # )
-#         # optimizer = tf.keras.optimizers.experimental.Adamax(
-#         #     learning_rate=0.001,
-#         #     # momentum=0.5,
-#         #     # nesterov=True,
-#         # )
-#         params = tf.Variable(
-#             tf.zeros_like(design_matrix[0])
-#             if lut_start is None else
-#             tf.cast(
-#                 lut_start[..., idx_channel].reshape([size**3])
-#                 - identity[..., idx_channel].reshape([size ** 3])
-#                 , design_matrix.dtype
-#             )
-#         )
-#
-#         def loss(params_, iter):
-#             # transformed = tf.linalg.matmul(
-#             #     design_matrix,
-#             #     softclip(params_, bounds_lower, bounds_upper)[:, tf.newaxis],
-#             #     a_is_sparse=True
-#             # )[:, 0]
-#
-#             transformed = tf.sparse.sparse_dense_matmul(
-#                 design_matrix_sparse,
-#                 softclip(params_, bounds_lower, bounds_upper)[:, tf.newaxis],
-#                 # a_is_sparse=True
-#             )[:, 0]
-#
-#             loss = tf.reduce_mean(tf.abs(differences_references_raw_channel_tf - transformed))
-#             tf.print('iter', iter, 'loss:', loss)
-#
-#             return loss
-#
-#         @tf.function(experimental_follow_type_hints=True)
-#         def train_step(iter: tf.Tensor):
-#             with tf.GradientTape() as tape:
-#                 loss_value = loss(params, iter)
-#             grads = tape.gradient(loss_value, [params])
-#             optimizer.apply_gradients(zip(grads, [params]))
-#             return loss_value
-#
-#         tf.map_fn(
-#             train_step,
-#             tf.range(3000),
-#             fn_output_signature=design_matrix.dtype
-#         )
-#
-#         return softclip(params, bounds_lower, bounds_upper)
-#
-#
-#
-#     coeffs_rescaled = optimize()
-#     t2 = time.time()
-#
-#     return coeffs_rescaled
 
 def fit_channel_constrained(design_matrix, differences_references_raw_channel, idx_channel, size):
     stds = np.std(design_matrix, axis=0)
