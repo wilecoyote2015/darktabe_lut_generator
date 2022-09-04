@@ -1228,7 +1228,8 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
             'ADOBERGB',
             # '--icc-intent',
             # 'ABSOLUTE_COLORIMETRIC',
-            # '--style-overwrite',  # TODO: activating leads to the color calibration module not rendered on export despite it being active in darkroom.
+            '--style-overwrite',
+            # TODO: activating leads to the color calibration module not rendered on export despite it being active in darkroom.
             '--core',
             '--configdir',
             path_dir_conf_temp,
