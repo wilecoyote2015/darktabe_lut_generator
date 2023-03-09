@@ -71,31 +71,6 @@ INTERPOLATORS = {
 #   is there a problem when exporting the sample images regarding the rendering intent,
 #   so that out-of-gamut values mapping is not bijective?
 
-# def estimate_transform_features(im1_grey, im2_grey):
-#     import numpy as np
-#     import cv2 as cv
-#     MIN_MATCH_COUNT = 10
-#     img1 = cv.imread('box.png', 0)  # queryImage
-#     img2 = cv.imread('box_in_scene.png', 0)  # trainImage
-#     # Initiate SIFT detector
-#     sift = cv.SIFT_create()
-#     # find the keypoints and descriptors with SIFT
-#     kp1, des1 = sift.detectAndCompute(img1, None)
-#     kp2, des2 = sift.detectAndCompute(img2, None)
-#     FLANN_INDEX_KDTREE = 1
-#     index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
-#     search_params = dict(checks=50)
-#     flann = cv.FlannBasedMatcher(index_params, search_params)
-#     matches = flann.knnMatch(des1, des2, k=2)
-#     # store all the good matches as per Lowe's ratio test.
-#     good = []
-#     for m, n in matches:
-#         if m.distance < 0.7 * n.distance:
-#             good.append(m)
-#
-#     H, _ = cv.findHomography( features0.matched_pts, \
-#         features1.matched_pts, cv.RANSAC, 5.0)
-
 def align_images_ecc(im1, im2, edge_detection=False, translation_only=False, dir_out_info=None, name_1=None,
                      name_2=None):
     """Align image 1 to image 2.
@@ -1164,12 +1139,17 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
          path_dt_exec=None,
          path_style_image_user=None, path_style_raw_user=None, path_dir_intermediate=None, dir_out_info=None,
          make_interpolated_red=False, make_unchanged_red=False, interpolate_unreliable=True,
-         use_lens_correction=True, legacy_color=False, n_passes_alignment=1,
+         use_lens_correction=True, n_passes_alignment=1,
          align_translation_only=False,
          sample_uniform=False, interpolate_only_missing_data=False, interpolation='trilinear',
-         paths_dirs_files_config_use=None, title_lut=None, comment_lut=None):
+         paths_dirs_files_config_use=None,
+         path_config_dir=None,
+         title_lut=None, comment_lut=None):
     extensions_raw = ['raw', 'raf', 'dng', 'nef', 'cr3', 'arw', 'cr2', 'cr3', 'orf', 'rw2']
     extensions_image = ['jpg', 'jpeg', 'tiff', 'tif', 'png']
+
+    if paths_dirs_files_config_use is not None and path_config_dir is not None:
+        raise ValueError('Only one, paths_dirs_files_config_use or path_config_dir is allowed.')
 
     pairs_images = []
     for filename_raw in os.listdir(dir_images):
@@ -1192,10 +1172,15 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
         os.mkdir(path_dir_images_temp)
 
         path_dir_conf_temp = os.path.join(path_dir_temp, 'conf')
-        os.mkdir(path_dir_conf_temp)
         path_styles_temp = os.path.join(path_dir_temp, 'styles')
         os.mkdir(path_styles_temp)
         print(path_dir_conf_temp)
+
+        # if config dir is supplied, copy it
+        if path_config_dir is not None:
+            shutil.copytree(path_config_dir, path_dir_conf_temp)
+        else:
+            os.mkdir(path_dir_conf_temp)
 
         # if supplied, fill conf dir with user data
         if paths_dirs_files_config_use is not None:
@@ -1235,12 +1220,12 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
             path_dir_conf_temp,
             '--library',
             ':memory:',
-            '--conf',
-            f'plugins/darkroom/chromatic-adaptation={"legacy" if legacy_color else "modern"}',
+            # '--conf',
+            # f'plugins/darkroom/chromatic-adaptation={"legacy" if legacy_color else "modern"}',
             '--conf',
             'plugins/darkroom/sharpen/auto_apply=FALSE',
-            '--conf',
-            'plugins/darkroom/workflow=none',
+            # '--conf',
+            # 'plugins/darkroom/workflow=none',
             '--conf',
             'opencl=FALSE'
         ]
@@ -1285,11 +1270,7 @@ def main(dir_images, file_out, size=9, n_pixels_sample=100000, is_grayscale=Fals
                 'darktable-cli' if path_dt_exec is None else path_dt_exec,
                 path_in_raw,
                 path_out_raw,
-                # '--style',
-                # get_name_style(path_style_raw_temp),
                 *args_common,
-                # "--luacmd",
-                # f"local dt = require \"darktable\"; dt.styles.import(\"{path_style_raw_temp}\")"
             ] if path_style_raw_user is None and not use_lens_correction else [
                 'darktable-cli' if path_dt_exec is None else path_dt_exec,
                 path_in_raw,

@@ -22,6 +22,8 @@ import sys
 from darktable_lut_generator.estimate_lut import main as main_
 
 
+# TODO: add option to add conf lines that are passed with --conf to darktable.
+
 def main():
     parser = argparse.ArgumentParser(
         # description='Generate .cube 3D LUT from jpg/raw sample pairs',
@@ -138,17 +140,11 @@ def main():
     )
     parser.set_defaults(align_translation_only=False)
     parser.add_argument(
-        '--legacy_color',
-        action='store_true',
-        help='Use legacy color adaption for raw development'
-    )
-    parser.add_argument(
         '--interpolation',
         type=str,
         default='trilinear',
         help='LUT interpolation. Either trilinear or tetrahedral.'
     )
-    parser.set_defaults(legacy_color=False)
     parser.add_argument(
         '--path_dt_cli',
         type=str,
@@ -181,8 +177,20 @@ def main():
              ' system from interfering with the LUT generation (e.g. by auto-applying presets). Here, a comma-separated'
              ' list of file or directory paths that will be copied to the empty darktable config directory'
              ' can be specified. A use case is if one wants to use raw presets with --path_style_raw that use'
-             ' a custom input or output color profile'
+             ' a custom input or output color profile.'
+             'This option can only be used if path_config_dir is not used.'
     )
+
+    parser.add_argument(
+        '--path_config_dir',
+        type=str,
+        default=None,
+        help='By default, darktable is called with an empty config directory, in order to prevent user settings on the'
+             ' system from interfering with the LUT generation (e.g. by auto-applying presets). Here, a config dir can be specified.'
+             ' use this if you want to make an LUT specifically for your default settings applied to images.'
+             'to use. this option can only be used if paths_dirs_files_config_use is not used.'
+    )
+
     parser.add_argument(
         '--path_dir_intermediate',
         type=str,
@@ -255,13 +263,13 @@ def main():
         args.make_unchanged_red,
         not args.no_interpolation_unsampled_colors,
         args.use_lens_correction,
-        args.legacy_color,
         args.n_passes_alignment,
         args.align_translation_only,
         args.sample_uniform,
         not args.interpolate_unreliable_colors,
         args.interpolation,
         args.paths_dirs_files_config_use,
+        args.path_config_dir,
         args.title,
         args.comment
     )
