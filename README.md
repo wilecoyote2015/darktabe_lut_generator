@@ -3,6 +3,7 @@ It was designed to obtain 3D LUTs replicating in-camera jpeg styles.
 This is especially useful if one shoots large sets of RAW photos (e.g. for commission), where most shall simply
 resemble the standard out-of-camera (OOC) style when exported by darktable, while still being able to do some quick
 corrections on selected images while maintaining the OOC style.
+**The resulting LUTs are, if using the default processing style, intended for usage without Filmic/Basecurve etc. (Set auto-apply pixel workflow defaults to none)**
 
 Below is an example using an LUT estimated to match the Provia film simulation on a Fujifilm X-T3.
 First is the OOC Jpeg, second is the RAW processed in Darktable with the LUT and third is the RAW processed in Darktable
