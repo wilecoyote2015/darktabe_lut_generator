@@ -30,6 +30,7 @@ import numpy as np
 import cv2
 import scipy.optimize
 from sklearn.linear_model import Lasso
+from sklearn.linear_model import QuantileRegressor
 import logging
 from tqdm import tqdm
 import tempfile
@@ -41,6 +42,7 @@ from scipy.spatial import KDTree
 from scipy.optimize import lsq_linear
 from scipy import ndimage
 import time
+from statsmodels.regression.quantile_regression import QuantReg
 
 INTERPOLATORS = {
     'trilinear': colour.algebra.table_interpolation_trilinear,
@@ -978,17 +980,57 @@ def fit_channel_constrained_abs_dev(design_matrix, differences_references_raw_ch
     return coeffs_rescaled
 
 
-def fit_channel_constrained(design_matrix, differences_references_raw_channel, idx_channel, size):
+def fit_channel_unconstrained_median(design_matrix, differences_references_raw_channel, idx_channel, size):
     stds = np.std(design_matrix, axis=0)
     stds[stds == 0] = 1.
     identity = make_lut_identity_normed(size, dtype=design_matrix.dtype)
 
-    # design_matrix_scaled = design_matrix / stds[np.newaxis, ...]
+    std_target = np.std(differences_references_raw_channel)
+    differences_references_raw_channel_scaled = differences_references_raw_channel / std_target
+
+    design_matrix_scaled = design_matrix / stds[np.newaxis, ...]
 
     bounds_lower = (-1 * identity[..., idx_channel].reshape([size ** 3]))
     # bounds_lower_scaled = bounds_lower * stds
     bounds_upper = (1. - identity[..., idx_channel]).reshape([size ** 3])
     # bounds_upper_scaled = bounds_upper * stds
+
+    # raise NotImplementedError
+
+    regression = QuantReg(differences_references_raw_channel_scaled, design_matrix_scaled)
+    t1 = time.time()
+    # result_opt = lsq_linear(design_matrix_scaled, differences_references_raw_channel,
+    #                         (bounds_lower_scaled, bounds_upper_scaled)
+    #                         )
+    result_opt = regression.fit(
+        0.5,
+
+    )
+    coeffs_rescaled = result_opt.params / stds * std_target
+
+    result = np.clip(coeffs_rescaled, bounds_lower, bounds_upper)
+
+    # coeffs_rescaled = result_opt.x
+    t2 = time.time()
+    print(f'Fitted in {t2 - t1} seconds.')
+
+    return result
+
+def fit_channel_constrained(design_matrix, differences_references_raw_channel, idx_channel, size):
+    stds = np.std(design_matrix, axis=0)
+    stds[stds == 0] = 1.
+    identity = make_lut_identity_normed(size, dtype=design_matrix.dtype)
+
+    design_matrix_scaled = design_matrix / stds[np.newaxis, ...]
+
+    std_target = np.std(differences_references_raw_channel)
+    differences_references_raw_channel_scaled = differences_references_raw_channel / std_target
+
+    # TODO: is scaling w.r.t. stds and std_target correct?
+    bounds_lower = (-1 * identity[..., idx_channel].reshape([size ** 3]))
+    bounds_lower_scaled = bounds_lower * stds / std_target
+    bounds_upper = (1. - identity[..., idx_channel]).reshape([size ** 3])
+    bounds_upper_scaled = bounds_upper * stds / std_target
 
     # regression = LinearRegression(fit_intercept=False)
     t1 = time.time()
@@ -996,12 +1038,12 @@ def fit_channel_constrained(design_matrix, differences_references_raw_channel, i
     #                         (bounds_lower_scaled, bounds_upper_scaled)
     #                         )
     result_opt = lsq_linear(
-        design_matrix,
-        differences_references_raw_channel,
-        (bounds_lower, bounds_upper)
+        design_matrix_scaled,
+        differences_references_raw_channel_scaled,
+        (bounds_lower_scaled, bounds_upper_scaled)
     )
-    # coeffs_rescaled = result_opt.x / stds
-    coeffs_rescaled = result_opt.x
+    coeffs_rescaled = result_opt.x / stds * std_target
+    # coeffs_rescaled = result_opt.x
     t2 = time.time()
     print(f'Fitted in {t2 - t1} seconds.')
 
@@ -1049,6 +1091,7 @@ def perform_estimation(pixels_references, pixels_raws, size, is_grayscale, inter
         print(f'estimating channel {idx_channel}')
 
         # coefficients = fit_channel_constrained_abs_dev(
+        # coefficients = fit_channel_unconstrained_median(
         coefficients = fit_channel_constrained(
             # coefficients = fit_channel_tf(
             design_matrix,

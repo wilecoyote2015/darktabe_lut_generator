@@ -5,3 +5,5 @@ opencv-python
 tqdm
 pandas
 plotly
+colour-science
+statsmodels
